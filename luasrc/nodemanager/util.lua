@@ -475,6 +475,59 @@ function M.parse_proxy_form(form)
   return true, list
 end
 
+function M.parse_provider_form(form)
+  local names = form["name[]"] or form.name
+  local urls  = form["url[]"]  or form.url
+
+  if type(names) == "string" then
+    names = { names }
+    urls  = { urls }
+  end
+
+  local list = {}
+  local total = #(names or {})
+  for i = 1, total do
+    local n = trim((names and names[i]) or "")
+    local u = trim((urls  and urls[i])  or "")
+    local all_blank = (n == "" and u == "")
+    if not all_blank then
+      if n == "" or u == "" then
+        return false, nil, i18n.translate("Fields cannot be empty")
+      end
+      if not is_http_url(u) then
+        return false, nil, i18n.translatef("Invalid URL at row %d", i)
+      end
+      table.insert(list, { name = n, url = u })
+    end
+  end
+
+  return true, list
+end
+
+function M.parse_dns_form(form)
+  local dns = form["dns[]"] or form.dns
+
+  if type(dns) == "string" then dns = { dns } end
+
+  local list = {}
+  local total = #(dns or {})
+  for i = 1, total do
+    local ip = trim((dns and dns[i]) or "")
+    if ip ~= "" then
+      if not is_ipv4(ip) then
+        return false, nil, i18n.translatef("Invalid DNS at row %d", i)
+      end
+      table.insert(list, ip)
+    end
+  end
+
+  if #list == 0 then
+    return false, nil, i18n.translate("DNS cannot be empty")
+  end
+
+  return true, list
+end
+
 -- ===== Save: proxies & rules =====
 function M.save_proxies_and_rules(list)
   local lines = read_lines()

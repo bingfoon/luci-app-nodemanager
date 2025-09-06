@@ -8,7 +8,7 @@
 - DNS `nameserver` 仅 IPv4，其他 DNS 选项原样保留；
 - 日志查看（`/etc/nikki/nodemanager.log` 或 `logread`）；
 - i18n：中文、英文；
-- GitHub Action 云编译：OpenWrt 24.10.x，x86_64 与 mediatek/filogic。
+- GitHub Action 云编译：OpenWrt 24.10.x，mediatek/filogic。
 
 ## 安装
 ```sh
