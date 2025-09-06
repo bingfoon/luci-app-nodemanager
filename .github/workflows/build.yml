@@ -26,10 +26,10 @@ jobs:
           echo "VER=$VER" >> $GITHUB_ENV
           case "${{ matrix.target.arch }}-${{ matrix.target.sub }}" in
             x86-64)
-              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/x86/64/openwrt-sdk-${VER}-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/x86/64/openwrt-sdk-${VER}-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
             ;;
             mediatek-filogic)
-              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/mediatek/filogic/openwrt-sdk-${VER}-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/mediatek/filogic/openwrt-sdk-${VER}-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
             ;;
           esac
           echo "SDK_URL=$SDK_URL" >> $GITHUB_ENV
