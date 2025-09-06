@@ -4,14 +4,22 @@ local i18n = require "luci.i18n"
 
 local M = {}
 
--- ===== Defaults =====
+-- Safety shim for table.insert (optional robustness)
+do
+  local _insert = table.insert
+  function table.insert(t, a, b)
+    if b == nil then return _insert(t, a) end
+    if type(a) ~= "number" then return _insert(t, b) end
+    return _insert(t, a, b)
+  end
+end
+
 local DEFAULT_CFG = "/etc/nikki/profiles/config.yaml"
 local DEFAULT_TPL = "/usr/share/nodemanager/config.template.yaml"
 
--- ===== Helpers =====
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
-local function is_ipv4(s) return s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end
-local function is_hostname(s) return s:match("^[%w%-%.]+$") ~= nil end
+local function is_ipv4(s) return s and s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end
+local function is_hostname(s) return s and s:match("^[%w%-%.]+$") ~= nil end
 local function is_port(p) p = tonumber(p); return p and p >= 1 and p <= 65535 end
 local function is_http_url(u) return u and u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$") end
 
@@ -27,9 +35,8 @@ local function tpl_path()
   return (t and #t>0) and t or DEFAULT_TPL
 end
 
--- Template used when target config is missing
 local function fallback_template()
-  return [[
+  return [===[
 airport: &airport
   type: http
   interval: 86400
@@ -50,6 +57,7 @@ proxies:
   # 落地节点信息必须添加在这一行上面
   - {name: 直连, type: direct}
 
+# 全局配置 
 port: 7890
 socks-port: 7891
 redir-port: 7892
@@ -215,11 +223,9 @@ rule-providers:
   telegram_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
   netflix_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
   apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
-
-]]
+]===]
 end
 
--- Ensure config exists by copying from template (or fallback text)
 local function ensure_config_exists()
   local path = conf_path()
   if fs.access(path) then return path end
@@ -228,11 +234,9 @@ local function ensure_config_exists()
   local t = tpl_path()
   local content = fs.readfile(t) or fallback_template()
   fs.writefile(path, content)
-  sys.call(string.format("logger -t nodemanager 'created %q from template %q'", path, t))
   return path
 end
 
--- Read/write helpers (append-only insert to avoid 3-arg insert pitfalls)
 local function read_lines(path)
   path = path or ensure_config_exists()
   local s = fs.readfile(path) or ""
@@ -250,7 +254,6 @@ local function write_lines(lines, path)
   return fs.writefile(path, table.concat(lines, "\n").."\n")
 end
 
--- Anchor helpers
 local function ensure_anchor_block(lines, header, start_hint, end_hint)
   local header_pat = "^%s*" .. header .. ":%s*$"
   local header_idx
@@ -301,7 +304,6 @@ local function find_range(lines, start_hint, end_hint)
   return nil, nil
 end
 
--- Parse helpers
 local function parse_proxies(lines)
   local proxies = {}
   for _,l in ipairs(lines) do
@@ -325,14 +327,18 @@ local function parse_proxies(lines)
   return proxies
 end
 
+-- STRICT bindmap parser: only keep valid IPv4 (a.b.c.d) and skip anything else (e.g., "0")
 local function parse_bindmap(lines)
   local map = {}
   for _,l in ipairs(lines) do
-    local ip, name = l:match("^%s*%-%s*SRC%-IP%-CIDR,([%d%.]+)/32,([^\r\n]+)$")
+    local ip, name = l:match("^%s*%-%s*SRC%-IP%-CIDR,([^,/]+)/32,([^\r\n]+)$")
     if ip and name then
+      ip = trim(ip)
       name = trim(name)
-      map[name] = map[name] or {}
-      table.insert(map[name], trim(ip))
+      if is_ipv4(ip) then
+        map[name] = map[name] or {}
+        table.insert(map[name], ip)
+      end
     end
   end
   return map
@@ -374,10 +380,8 @@ local function parse_dns_servers(lines)
       in_ns = true
     elseif in_ns then
       local ip = l:match("^%s*%-%s*([%d%.]+)%s*$")
-      if ip then
+      if ip and is_ipv4(ip) then
         table.insert(servers, ip)
-      else
-        if l:match("^%s*%S") and not l:match("^%s*%-") then in_ns = false end
       end
     end
   end
@@ -390,11 +394,14 @@ function M.load_all()
   local s2,e2 = find_range(lines, "落地节点对应的子网设备添加在下面", "落地节点对应的子网设备添加在上面")
 
   local proxies = {}
-  if s1 and e1 then
+  if s1 and e1 and s1 <= e1 then
     local slice = {}
     for i=s1,e1 do table.insert(slice, lines[i]) end
     proxies = parse_proxies(slice)
+  else
+    proxies = parse_proxies(lines)
   end
+
   local bindmap = {}
   do
     local slice
@@ -402,15 +409,15 @@ function M.load_all()
       slice = {}
       for i=s2,e2 do table.insert(slice, lines[i]) end
     end
-    -- 区间为空或未找到时，回退解析整份文件
     bindmap = parse_bindmap(slice or lines)
   end
+
   local providers = parse_providers(lines)
   local dns_servers = parse_dns_servers(lines)
   return { proxies = proxies, bindmap = bindmap, providers = providers, dns_servers = dns_servers }
 end
 
--- ===== Form parsing & validation =====
+-- forms
 function M.parse_proxy_form(form)
   local names     = form["name[]"]      or form.name
   local servers   = form["server[]"]    or form.server
@@ -478,61 +485,50 @@ end
 function M.parse_provider_form(form)
   local names = form["name[]"] or form.name
   local urls  = form["url[]"]  or form.url
+  if type(names)=="string" then names={names}; urls={urls} end
 
-  if type(names) == "string" then
-    names = { names }
-    urls  = { urls }
-  end
-
-  local list = {}
-  local total = #(names or {})
-  for i = 1, total do
-    local n = trim((names and names[i]) or "")
-    local u = trim((urls  and urls[i])  or "")
-    local all_blank = (n == "" and u == "")
+  local list, seen = {}, {}
+  for i=1,#(names or {}) do
+    local n = trim(names[i] or "")
+    local u = trim((urls and urls[i]) or "")
+    local all_blank = (n=="" and u=="")
     if not all_blank then
-      if n == "" or u == "" then
-        return false, nil, i18n.translate("Fields cannot be empty")
+      if n=="" or u=="" then
+        return false, nil, i18n.translatef("Row %d has empty required fields", i)
       end
       if not is_http_url(u) then
         return false, nil, i18n.translatef("Invalid URL at row %d", i)
       end
-      table.insert(list, { name = n, url = u })
+      if seen[n] then
+        return false, nil, i18n.translatef("Duplicate name at row %d: %s", i, n)
+      end
+      seen[n]=true
+      table.insert(list, { name=n, url=u })
     end
   end
-
   return true, list
 end
 
 function M.parse_dns_form(form)
   local dns = form["dns[]"] or form.dns
-
-  if type(dns) == "string" then dns = { dns } end
-
+  if type(dns)=="string" then dns={dns} end
   local list = {}
-  local total = #(dns or {})
-  for i = 1, total do
-    local ip = trim((dns and dns[i]) or "")
+  for i=1,#(dns or {}) do
+    local ip = trim(dns[i] or "")
     if ip ~= "" then
       if not is_ipv4(ip) then
-        return false, nil, i18n.translatef("Invalid DNS at row %d", i)
+        return false, nil, i18n.translatef("Invalid DNS IP at row %d: %s", i, ip)
       end
       table.insert(list, ip)
     end
   end
-
-  if #list == 0 then
-    return false, nil, i18n.translate("DNS cannot be empty")
-  end
-
+  if #list==0 then return false, nil, i18n.translate("Fields cannot be empty") end
   return true, list
 end
 
--- ===== Save: proxies & rules =====
 function M.save_proxies_and_rules(list)
   local lines = read_lines()
 
-  -- Ensure anchors present
   lines = ensure_anchor_block(lines, "proxies",
     "落地节点信息从下面开始添加",
     "落地节点信息必须添加在这一行上面")
@@ -561,14 +557,12 @@ function M.save_proxies_and_rules(list)
     end
   end
 
-  -- Replace proxies block
   local out = {}
   for i=1,#lines do
     if i==ps then
       for _,l in ipairs(newp) do table.insert(out, l) end
     end
     if i>=ps and i<=pe then
-      -- skip old block content
     else
       table.insert(out, lines[i])
     end
@@ -576,13 +570,11 @@ function M.save_proxies_and_rules(list)
   lines = out
   out = {}
 
-  -- Replace rules block
   for i=1,#lines do
     if i==rs then
       for _,l in ipairs(newr) do table.insert(out, l) end
     end
     if i>=rs and i<=re then
-      -- skip old
     else
       table.insert(out, lines[i])
     end
@@ -591,12 +583,11 @@ function M.save_proxies_and_rules(list)
   return write_lines(out) ~= nil, nil
 end
 
--- ===== Save: providers =====
 function M.save_providers(list)
   local lines = read_lines()
   local start_idx
   for i,l in ipairs(lines) do
-    if l:match("^%s*proxy%-providers:%s*$") then start_idx = i break end
+    if l:match("^%s*proxy%-providers:%s*$") then start_idx = i; break end
   end
   if not start_idx then
     if #lines > 0 and lines[#lines] ~= "" then table.insert(lines, "") end
@@ -619,12 +610,11 @@ function M.save_providers(list)
   return write_lines(out) ~= nil, nil
 end
 
--- ===== Save: DNS =====
 function M.save_dns_servers(servers)
   local lines = read_lines()
   local dns_start
   for i,l in ipairs(lines) do
-    if l:match("^dns:%s*$") then dns_start = i break end
+    if l:match("^dns:%s*$") then dns_start = i; break end
   end
   if not dns_start then
     if #lines > 0 and lines[#lines] ~= "" then table.insert(lines, "") end
@@ -671,9 +661,5 @@ function M.save_dns_servers(servers)
   return write_lines(out) ~= nil, nil
 end
 
--- Expose current conf path
-function M.conf_path()
-  return conf_path()
-end
-
+function M.conf_path() return conf_path() end
 return M

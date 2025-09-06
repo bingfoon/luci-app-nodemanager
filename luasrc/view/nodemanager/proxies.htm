@@ -3,6 +3,8 @@
 <% if errmsg then %><div class="alert-message warning"><%=errmsg%></div><% end %>
 
 <form id="proxyForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/proxies')%>">
+  <input type="hidden" name="token" value="<%=token%>"/>
+
   <table class="table">
     <thead>
       <tr>
@@ -17,9 +19,15 @@
     </thead>
     <tbody id="proxyBody">
       <% for i,p in ipairs(proxies or {}) do
-           local ips = (bindmap and bindmap[p.name]) or {}
+           local raw = bindmap and bindmap[p.name]
            local ipsval = ""
-           if type(ips) == "table" then ipsval = table.concat(ips, ", ") else ipsval = ips or "" end
+           if type(raw) == "table" then
+             ipsval = table.concat(raw, ", ")
+           elseif type(raw) == "string" then
+             ipsval = raw
+           else
+             ipsval = ""
+           end
       %>
       <tr>
         <td><input class="cbi-input-text" name="name[]" value="<%=p.name%>" required/></td>
@@ -31,11 +39,22 @@
         <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
       </tr>
       <% end %>
+      <% if not proxies or #proxies==0 then %>
+      <tr>
+        <td><input class="cbi-input-text" name="name[]" required/></td>
+        <td><input class="cbi-input-text" name="server[]" required/></td>
+        <td><input class="cbi-input-text" name="port[]" required/></td>
+        <td><input class="cbi-input-text" name="username[]" required/></td>
+        <td><input class="cbi-input-text" name="password[]" required/></td>
+        <td><input class="cbi-input-text" name="bindips[]" placeholder="192.168.8.101, 192.168.8.102"/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
     </tbody>
   </table>
   <div>
     <button type="button" class="cbi-button cbi-button-add" onclick="addRow()"><%:Add%></button>
-    <button type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+    <button id="saveBtn" type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
   </div>
 </form>
 
@@ -55,12 +74,35 @@ function addRow() {
 }
 function rmRow(btn) { btn.closest('tr').remove(); }
 
-document.getElementById('proxyForm').addEventListener('submit', async (e)=>{
+async function postForm(form) {
+  const token = "<%=token%>" || "";
+  const url = form.action + (token ? ("?token="+encodeURIComponent(token)) : "");
+  const btn = document.getElementById('saveBtn');
+  btn && (btn.disabled = true);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      body: new FormData(form),
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+    });
+    const text = await resp.text();
+    let j;
+    try { j = JSON.parse(text); }
+    catch (e) { alert('Save failed: HTTP ' + resp.status + '\\n' + text.slice(0, 200)); return; }
+    if (j.code === 0) location.reload();
+    else alert(j.msg || 'Error');
+  } catch (err) {
+    alert('Network error: ' + err);
+  } finally {
+    btn && (btn.disabled = false);
+  }
+}
+
+document.getElementById('proxyForm').addEventListener('submit', function(e){
   e.preventDefault();
-  const form = new FormData(e.target);
-  const r = await fetch(e.target.action, { method:'POST', body: form });
-  const j = await r.json();
-  if (j.code===0) location.reload(); else alert(j.msg||'Error');
+  postForm(e.target);
 });
 </script>
 
