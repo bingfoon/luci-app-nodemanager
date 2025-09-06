@@ -6,14 +6,14 @@ on:
       owrt_version:
         description: OpenWrt version (24.10.x)
         required: false
-        default: "24.10.0"
+        default: "24.10.2"
 
 jobs:
   build:
     strategy:
       matrix:
         target:
-          - { arch: "x86", sub: "64" }
+          #- { arch: "x86", sub: "64" }
           - { arch: "mediatek", sub: "filogic" }
     runs-on: ubuntu-22.04
     steps:
