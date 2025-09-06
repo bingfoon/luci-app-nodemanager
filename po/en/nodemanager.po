@@ -1,0 +1,74 @@
+msgid "Node Manager"
+msgstr "Node Manager"
+
+msgid "Proxies"
+msgstr "Proxies"
+
+msgid "Providers"
+msgstr "Providers"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Logs"
+msgstr "Logs"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "Server (IP or Domain)"
+msgstr "Server (IP or Domain)"
+
+msgid "Port"
+msgstr "Port"
+
+msgid "Username"
+msgstr "Username"
+
+msgid "Password"
+msgstr "Password"
+
+msgid "Bind IP (/32)"
+msgstr "Bind IP (/32)"
+
+msgid "Add"
+msgstr "Add"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Provider Name"
+msgstr "Provider Name"
+
+msgid "Subscribe URL"
+msgstr "Subscribe URL"
+
+msgid "Nameserver (IPv4)"
+msgstr "Nameserver (IPv4)"
+
+msgid "Refresh"
+msgstr "Refresh"
+
+msgid "Fields cannot be empty"
+msgstr "Fields cannot be empty"
+
+msgid "Invalid server at row %d"
+msgstr "Invalid server at row %d"
+
+msgid "Invalid port at row %d"
+msgstr "Invalid port at row %d"
+
+msgid "Invalid bind IP at row %d"
+msgstr "Invalid bind IP at row %d"
+
+msgid "Invalid URL at row %d"
+msgstr "Invalid URL at row %d"
+
+msgid "DNS cannot be empty"
+msgstr "DNS cannot be empty"
+
+msgid "Invalid DNS at row %d"
+msgstr "Invalid DNS at row %d"
+
+msgid "Config file not found: "
+msgstr "Config file not found: "

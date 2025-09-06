@@ -1,0 +1,35 @@
+<%+header%>
+<h2><%:Node Manager - DNS%></h2>
+
+<form id="dnsForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/dns')%>">
+  <table class="table">
+    <thead><tr><th><%:Nameserver (IPv4)%></th><th></th></tr></thead>
+    <tbody id="dnsBody">
+      <% for _,ip in ipairs(servers or {}) do %>
+      <tr>
+        <td><input class="cbi-input-text" name="dns[]" value="<%=ip%>" required/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <div>
+    <button type="button" class="cbi-button cbi-button-add" onclick="addRow()">+</button>
+    <button type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+  </div>
+</form>
+
+<script>
+function addRow(){ const tr=document.createElement('tr'); tr.innerHTML=
+  '<td><input class="cbi-input-text" name="dns[]" required placeholder="223.5.5.5"/></td>'+
+  '<td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>';
+  document.getElementById('dnsBody').appendChild(tr);
+}
+function rmRow(btn){ btn.closest('tr').remove(); }
+document.getElementById('dnsForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const r=await fetch(e.target.action,{method:'POST',body:new FormData(e.target)}); const j=await r.json();
+  if(j.code===0) location.reload(); else alert(j.msg||'Error');
+});
+</script>
+<%+footer%>

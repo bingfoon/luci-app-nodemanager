@@ -1,0 +1,63 @@
+<%+header%>
+<h2><%:Node Manager - Proxies%></h2>
+<% if errmsg then %><div class="alert-message warning"><%=errmsg%></div><% end %>
+
+<form id="proxyForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/proxies')%>">
+  <table class="table">
+    <thead>
+      <tr>
+        <th><%:Name%></th>
+        <th><%:Server (IP or Domain)%></th>
+        <th><%:Port%></th>
+        <th><%:Username%></th>
+        <th><%:Password%></th>
+        <th><%:Bind IP (/32)%></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="proxyBody">
+      <% for i,p in ipairs(proxies or {}) do %>
+      <tr>
+        <td><input class="cbi-input-text" name="name[]" value="<%=p.name%>" required/></td>
+        <td><input class="cbi-input-text" name="server[]" value="<%=p.server%>" required/></td>
+        <td><input class="cbi-input-text" name="port[]" value="<%=p.port%>" required/></td>
+        <td><input class="cbi-input-text" name="username[]" value="<%=p.username%>" required/></td>
+        <td><input class="cbi-input-text" name="password[]" value="<%=p.password%>" required/></td>
+        <td><input class="cbi-input-text" name="bindip[]" value="<%= (bindmap and bindmap[p.name]) or '' %>"/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <div>
+    <button type="button" class="cbi-button cbi-button-add" onclick="addRow()"><%:Add%></button>
+    <button type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+  </div>
+</form>
+
+<script>
+function addRow() {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="cbi-input-text" name="name[]" required/></td>
+    <td><input class="cbi-input-text" name="server[]" required/></td>
+    <td><input class="cbi-input-text" name="port[]" required/></td>
+    <td><input class="cbi-input-text" name="username[]" required/></td>
+    <td><input class="cbi-input-text" name="password[]" required/></td>
+    <td><input class="cbi-input-text" name="bindip[]"/></td>
+    <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+  `;
+  document.getElementById('proxyBody').appendChild(tr);
+}
+function rmRow(btn) { btn.closest('tr').remove(); }
+
+document.getElementById('proxyForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const form = new FormData(e.target);
+  const r = await fetch(e.target.action, { method:'POST', body: form });
+  const j = await r.json();
+  if (j.code===0) location.reload(); else alert(j.msg||'Error');
+});
+</script>
+
+<%+footer%>

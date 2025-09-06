@@ -1,0 +1,58 @@
+name: Build luci-app-nodemanager for OpenWrt 24.10.x
+
+on:
+  workflow_dispatch:
+    inputs:
+      owrt_version:
+        description: OpenWrt version (24.10.x)
+        required: false
+        default: "24.10.0"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          - { arch: "x86", sub: "64" }
+          - { arch: "mediatek", sub: "filogic" }
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          VER="${{ github.event.inputs.owrt_version || '24.10.0' }}"
+          echo "VER=$VER" >> $GITHUB_ENV
+          case "${{ matrix.target.arch }}-${{ matrix.target.sub }}" in
+            x86-64)
+              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/x86/64/openwrt-sdk-${VER}-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+            ;;
+            mediatek-filogic)
+              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/mediatek/filogic/openwrt-sdk-${VER}-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+            ;;
+          esac
+          echo "SDK_URL=$SDK_URL" >> $GITHUB_ENV
+
+      - name: Download SDK
+        run: |
+          wget -q "$SDK_URL" -O sdk.tar.xz
+          mkdir -p sdk && tar -xJf sdk.tar.xz -C sdk --strip-components=1
+
+      - name: Feed & Link package
+        run: |
+          pushd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          mkdir -p package/luci-app-nodemanager
+          rsync -a ../ ./package/luci-app-nodemanager/ --exclude sdk --exclude .git --exclude .github
+          make defconfig
+          make package/luci-app-nodemanager/{clean,compile} -j$(nproc) V=s
+          popd
+
+      - name: Upload ipk
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-nodemanager-${{ matrix.target.arch }}-${{ matrix.target.sub }}
+          path: |
+            sdk/bin/packages/*/*/luci-app-nodemanager_*.ipk
