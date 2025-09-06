@@ -15,7 +15,6 @@ proxy-providers:
 s5: &s5 {type: socks5, udp: true, dialer-proxy: "🚀 默认代理"}
 proxies:
   # 落地节点信息从下面开始添加
-  - { <<: *s5, name: "你的节点名字", server: 你的落地IP, port: 你的端口, username: 你的用户名, password: 你的密码}
   # 落地节点信息必须添加在这一行上面
   - {name: 直连, type: direct}
 
@@ -129,8 +128,7 @@ rules:
   - RULE-SET,private_ip,直连
   - RULE-SET,private_domain,直连
   - RULE-SET,apple_update_domain,🍎 Apple
-  # 落地节点对应的子网设备添加在下面。
-  - SRC-IP-CIDR,192.168.8.101/32,🇺🇲 S5 US01
+  # 落地节点对应的子网设备添加在下面
   # 落地节点对应的子网设备添加在上面
   - RULE-SET,proxylite,🚀 默认代理
   - RULE-SET,ai,🤖 ChatGPT
