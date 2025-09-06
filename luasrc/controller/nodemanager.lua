@@ -5,14 +5,11 @@ local http  = require "luci.http"
 local tpl   = require "luci.template"
 
 function index()
-  -- 根菜单：直接打开 Proxies 页面
-  local root = entry({"admin","services","nodemanager"},
-                     call("action_proxies"),
-                     _("Node Manager"), 59)
-  root.dependent = false
-  root.leaf = true
+  -- Services 分组
+  local s = entry({"admin","services","nodemanager"}, firstchild(), _("Node Manager"), 59)
+  s.dependent = false
 
-  -- 同时注册子页面（可直接访问）
+  -- 子页面
   entry({"admin","services","nodemanager","proxies"},   call("action_proxies"),   _("Proxies"),   1).leaf = true
   entry({"admin","services","nodemanager","providers"}, call("action_providers"), _("Providers"), 2).leaf = true
   entry({"admin","services","nodemanager","dns"},       call("action_dns"),       _("DNS"),       3).leaf = true
