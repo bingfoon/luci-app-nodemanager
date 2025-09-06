@@ -79,3 +79,4 @@ jobs:
           name: luci-app-nodemanager-${{ matrix.target.arch }}-${{ matrix.target.sub }}
           path: |
             sdk/bin/packages/*/*/luci-app-nodemanager_*.ipk
+            sdk/bin/packages/*/*/luci-i18n-nodemanager-*.ipk
