@@ -4,7 +4,16 @@ local i18n = require "luci.i18n"
 
 local M = {}
 
-local CONF = "/etc/nikki/profiles/config.yaml"
+local function conf_path()
+	local uci = require("luci.model.uci").cursor()
+	local p = uci:get("nodemanager", "config", "path")
+	if p and #p > 0 then return p end
+	return "/etc/nikki/profiles/config.yaml" -- 默认值（兼容旧行为）
+end
+
+function M.conf_path()  -- 导出给控制器/视图显示
+	return conf_path()
+end
 
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
 
@@ -14,8 +23,9 @@ local function is_port(p) p = tonumber(p); return p and p >= 1 and p <= 65535 en
 local function is_http_url(u) return u and u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$") end
 
 -- 可靠按行读取（兼容 \r\n / \n）
-local function read_lines()
-	local s = fs.readfile(CONF) or ""
+local function read_lines(path)
+	path = path or conf_path()
+	local s = fs.readfile(path) or ""
 	local t = {}
 	for line in (s.."\n"):gmatch("([^\n]*)\n") do
 		line = line:gsub("\r$","")
@@ -26,8 +36,9 @@ local function read_lines()
 	return t
 end
 
-local function write_lines(lines)
-	return fs.writefile(CONF, table.concat(lines, "\n").."\n")
+local function write_lines(lines, path)
+	path = path or conf_path()
+	return fs.writefile(path, table.concat(lines, "\n").."\n")
 end
 
 -- 通过注释锚点找可重写范围

@@ -72,3 +72,21 @@ msgstr "第 %d 行DNS不合法"
 
 msgid "Config file not found: "
 msgstr "未找到配置文件："
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Config file path"
+msgstr "配置文件路径"
+
+msgid "Create the file if missing"
+msgstr "若不存在则创建"
+
+msgid "Current file:"
+msgstr "当前文件："
+
+msgid "Path cannot be empty"
+msgstr "路径不能为空"
+
+msgid "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."
+msgstr "所选配置应包含本插件使用的锚点注释，否则编辑将失败。"

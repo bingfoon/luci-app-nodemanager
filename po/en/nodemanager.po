@@ -72,3 +72,21 @@ msgstr "Invalid DNS at row %d"
 
 msgid "Config file not found: "
 msgstr "Config file not found: "
+
+msgid "Settings"
+msgstr "Settings"
+
+msgid "Config file path"
+msgstr "Config file path"
+
+msgid "Create the file if missing"
+msgstr "Create the file if missing"
+
+msgid "Current file:"
+msgstr "Current file:"
+
+msgid "Path cannot be empty"
+msgstr "Path cannot be empty"
+
+msgid "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."
+msgstr "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."

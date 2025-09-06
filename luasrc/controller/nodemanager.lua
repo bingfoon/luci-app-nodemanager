@@ -10,10 +10,11 @@ function index()
   s.dependent = false
 
   -- 子页面
+  entry({"admin","services","nodemanager","settings"}, call("action_settings"), _("Settings"), 0).leaf = true
   entry({"admin","services","nodemanager","proxies"},   call("action_proxies"),   _("Proxies"),   1).leaf = true
   entry({"admin","services","nodemanager","providers"}, call("action_providers"), _("Providers"), 2).leaf = true
   entry({"admin","services","nodemanager","dns"},       call("action_dns"),       _("DNS"),       3).leaf = true
-  entry({"admin","services","nodemanager","logs"},      call("action_logs"),      _("Logs"),      4).leaf = true
+  --entry({"admin","services","nodemanager","logs"},      call("action_logs"),      _("Logs"),      4).leaf = true
 end
 
 local function ret(code, msg, data)
@@ -72,4 +73,44 @@ function action_logs()
     content = luci.sys.exec('logread -e nikki -e clash -e node 2>/dev/null | tail -n 500')
   end
   tpl.render("nodemanager/logs", { log = content })
+end
+
+function action_settings()
+  local i18n = require "luci.i18n"
+  local util = require "luci.nodemanager.util"
+  local uci  = require "luci.model.uci".cursor()
+  local nixio = require "nixio"
+
+  if http.getenv("REQUEST_METHOD") == "POST" then
+    local path = (http.formvalue("path") or ""):gsub("%s+$","")
+    local create = http.formvalue("create") == "1"
+
+    if path == "" then
+      http.prepare_content("application/json")
+      http.write_json({code=1, msg=i18n.translate("Path cannot be empty")})
+      return
+    end
+
+    -- 如需创建：先建父目录再 touch 文件
+    local dir = path:match("^(.+)/[^/]+$") or "/"
+    luci.sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
+    if create and not nixio.fs.access(path) then
+      nixio.fs.writefile(path, "")
+    end
+
+    -- 确保存在节，再写 path
+    uci:load("nodemanager")
+    if not uci:get("nodemanager","config") then
+      uci:add("nodemanager","nodemanager","config")
+    end
+    uci:set("nodemanager","config","path", path)
+    uci:commit("nodemanager")
+
+    http.prepare_content("application/json")
+    http.write_json({code=0, msg="ok"})
+    return
+  end
+
+  local cur = util.conf_path()
+  tpl.render("nodemanager/settings", { cur_path = cur })
 end

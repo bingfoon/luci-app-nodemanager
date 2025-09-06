@@ -1,0 +1,33 @@
+<%+header%>
+<h2><%:Node Manager - Settings%></h2>
+
+<div class="cbi-section">
+  <p><strong><%:Current file:%></strong> <code><%=cur_path%></code></p>
+  <p class="alert-message">
+    <%:The selected config must contain the anchor comments used by this app. Otherwise, editing will fail.%>
+  </p>
+</div>
+
+<form id="cfgForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/settings')%>">
+  <div class="cbi-section">
+    <label><%:Config file path%></label><br>
+    <input class="cbi-input-text" name="path" style="width:60%" value="<%=cur_path%>" required>
+    <label style="margin-left:12px;">
+      <input type="checkbox" name="create" value="1">
+      <%:Create the file if missing%>
+    </label>
+  </div>
+  <div>
+    <button type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+  </div>
+</form>
+
+<script>
+document.getElementById('cfgForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const r = await fetch(e.target.action, {method:'POST', body:new FormData(e.target)});
+  const j = await r.json();
+  if (j.code===0) location.reload(); else alert(j.msg||'Error');
+});
+</script>
+<%+footer%>
