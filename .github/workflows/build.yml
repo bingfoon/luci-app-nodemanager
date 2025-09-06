@@ -17,10 +17,16 @@ jobs:
           - { arch: "mediatek", sub: "filogic" }
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Prepare
+    - name: Lint Lua sources
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lua5.1
+        find luasrc -name '*.lua' -print0 | xargs -0 -n1 luac -p
+
+    - name: Prepare
         run: |
           VER="${{ github.event.inputs.owrt_version || '24.10.0' }}"
           echo "VER=$VER" >> $GITHUB_ENV

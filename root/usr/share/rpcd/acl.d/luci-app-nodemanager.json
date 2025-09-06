@@ -1,6 +1,6 @@
 {
   "luci-app-nodemanager": {
-    "description": "Grant LuCI NodeManager permissions",
+    "description": "Grant LuCI Node Manager permissions",
     "read": {
       "file": {
         "/etc/nikki/profiles/config.yaml": [ "read" ]
