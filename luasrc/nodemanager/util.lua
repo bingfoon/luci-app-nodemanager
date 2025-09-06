@@ -1,4 +1,3 @@
--- luasrc/nodemanager/util.lua
 local fs   = require "nixio.fs"
 local sys  = require "luci.sys"
 local i18n = require "luci.i18n"
@@ -10,30 +9,20 @@ local CONF = "/etc/nikki/profiles/config.yaml"
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
 
 local function is_ipv4(s) return s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end
-local function is_hostname(s)
-	return s:match("^[%w%-%.]+$") ~= nil
-end
-local function is_port(p)
-	p = tonumber(p)
-	return p and p >= 1 and p <= 65535
-end
-local function is_http_url(u)
-	return u and u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$")
-end
+local function is_hostname(s) return s:match("^[%w%-%.]+$") ~= nil end
+local function is_port(p) p = tonumber(p); return p and p >= 1 and p <= 65535 end
+local function is_http_url(u) return u and u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$") end
 
+-- 可靠按行读取（兼容 \r\n / \n）
 local function read_lines()
 	local s = fs.readfile(CONF) or ""
 	local t = {}
-	for line in s:gmatch("([^\r\n]*)\r?\n?") do
-		if line == nil then break end
-		if #line == 0 and #s == 0 then break end
+	for line in (s.."\n"):gmatch("([^\n]*)\n") do
+		line = line:gsub("\r$","")
 		table.insert(t, line)
-		if #table.concat(t,"\n") >= #s then break end
 	end
-	-- Fallback simple split
-	if #t == 0 and #s > 0 then
-		for l in s:gmatch("[^\r\n]+") do table.insert(t, l) end
-	end
+	-- 如果是空文件，t 会有一行空串；保持一致性
+	if #s == 0 then t = {} end
 	return t
 end
 
@@ -41,6 +30,7 @@ local function write_lines(lines)
 	return fs.writefile(CONF, table.concat(lines, "\n").."\n")
 end
 
+-- 通过注释锚点找可重写范围
 local function find_range(lines, start_hint, end_hint)
 	local sidx, eidx
 	for i,l in ipairs(lines) do
@@ -53,6 +43,7 @@ local function find_range(lines, start_hint, end_hint)
 	return nil, nil
 end
 
+-- 解析 proxies 片段
 local function parse_proxies(lines)
 	local proxies = {}
 	for _,l in ipairs(lines) do
@@ -76,6 +67,7 @@ local function parse_proxies(lines)
 	return proxies
 end
 
+-- 解析 rules 片段（name <- ip 绑定）
 local function parse_bindmap(lines)
 	local map = {}
 	for _,l in ipairs(lines) do
@@ -87,6 +79,7 @@ local function parse_bindmap(lines)
 	return map
 end
 
+-- 解析 providers
 local function parse_providers(lines)
 	local providers = {}
 	local in_block = false
@@ -111,23 +104,28 @@ local function parse_providers(lines)
 	return providers
 end
 
+-- 解析 DNS nameserver（去掉 goto/label，兼容 Lua 5.1）
 local function parse_dns_servers(lines)
 	local servers = {}
 	local in_dns, in_ns = false, false
 	for _,l in ipairs(lines) do
-		if l:match("^dns:%s*$") then in_dns = true end
-		if in_dns and l:match("^%S") and not l:match("^dns:%s*$") then
+		if l:match("^dns:%s*$") then
+			in_dns = true
+		elseif in_dns and l:match("^%S") and not l:match("^dns:%s*$") then
 			in_dns = false
 			in_ns = false
-		end
-		if in_dns and l:match("^%s*nameserver:%s*$") then in_ns = true; goto continue end
-		if in_ns then
+		elseif in_dns and l:match("^%s*nameserver:%s*$") then
+			in_ns = true
+		elseif in_ns then
 			local ip = l:match("^%s*%-%s*([%d%.]+)%s*$")
-			if ip then table.insert(servers, ip) else
-				if l:match("^%s*%S") and not l:match("^%s*%-") then in_ns = false end
+			if ip then
+				table.insert(servers, ip)
+			else
+				if l:match("^%s*%S") and not l:match("^%s*%-") then
+					in_ns = false
+				end
 			end
 		end
-		::continue::
 	end
 	return servers
 end
@@ -154,6 +152,7 @@ function M.load_all()
 	return { proxies = proxies, bindmap = bindmap, providers = providers, dns_servers = dns_servers }
 end
 
+-- 表单解析
 function M.parse_proxy_form(form)
 	local names    = form["name[]"]     or form.name
 	local servers  = form["server[]"]   or form.server
@@ -221,6 +220,7 @@ function M.parse_dns_form(form)
 	return true, out
 end
 
+-- 保存：重写 proxies 与 rules 片段
 function M.save_proxies_and_rules(list)
 	local lines = read_lines()
 	local ps,pe = find_range(lines, "落地节点信息从下面开始添加", "落地节点信息必须添加在这一行上面")
@@ -241,13 +241,14 @@ function M.save_proxies_and_rules(list)
 		end
 	end
 
+	-- 替换 proxies 片段
 	local out = {}
 	for i=1,#lines do
 		if i==ps then
 			for _,l in ipairs(newp) do table.insert(out, l) end
 		end
 		if i>ps and i<=pe then
-			-- skip
+			-- skip old
 		else
 			table.insert(out, lines[i])
 		end
@@ -255,12 +256,13 @@ function M.save_proxies_and_rules(list)
 	lines = out
 	out = {}
 
+	-- 替换 rules 片段
 	for i=1,#lines do
 		if i==rs then
 			for _,l in ipairs(newr) do table.insert(out, l) end
 		end
 		if i>rs and i<=re then
-			-- skip
+			-- skip old
 		else
 			table.insert(out, lines[i])
 		end
@@ -306,7 +308,9 @@ function M.save_dns_servers(servers)
 		if lines[i]:match("^%s*nameserver:%s*$") then
 			ns_start = i; ns_end = i
 			for j=i+1,#lines do
-				if lines[j]:match("^%s*%-") then ns_end = j else
+				if lines[j]:match("^%s*%-") then
+					ns_end = j
+				else
 					if lines[j]:match("^%s*%S") and not lines[j]:match("^%s*%-") then
 						break
 					end
