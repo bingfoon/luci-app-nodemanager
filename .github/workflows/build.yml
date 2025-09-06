@@ -36,8 +36,31 @@ jobs:
 
       - name: Download SDK
         run: |
-          wget -q "$SDK_URL" -O sdk.tar.xz
-          mkdir -p sdk && tar -xJf sdk.tar.xz -C sdk --strip-components=1
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y zstd xz-utils
+
+          SDK_ARCHIVE="$(basename "$SDK_URL")"
+          wget -q "$SDK_URL" -O "$SDK_ARCHIVE"
+
+          mkdir -p sdk
+          case "$SDK_ARCHIVE" in
+            *.tar.zst)
+              # tar 支持 zstd 时优先用 --zstd；否则用 unzstd 管道
+              if tar --help | grep -q -- '--zstd'; then
+                tar --zstd -xvf "$SDK_ARCHIVE" -C sdk --strip-components=1
+              else
+                unzstd -c "$SDK_ARCHIVE" | tar xvf - -C sdk --strip-components=1
+              fi
+              ;;
+            *.tar.xz)
+              tar -xJf "$SDK_ARCHIVE" -C sdk --strip-components=1
+              ;;
+            *)
+              echo "Unknown SDK archive format: $SDK_ARCHIVE"
+              exit 1
+              ;;
+          esac
 
       - name: Feed & Link package
         run: |
