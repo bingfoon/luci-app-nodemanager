@@ -5,6 +5,8 @@ name: build-luci-app-nodemanager
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      TERM: xterm   # 防止某些脚本意外尝试 menuconfig 时找不到终端
     strategy:
       fail-fast: false
       matrix:
@@ -47,79 +49,11 @@ jobs:
           src-git luci https://github.com/openwrt/luci.git;${BRANCH}
           src-git packages https://github.com/openwrt/packages.git;${BRANCH}
           EOF
-
           ./scripts/feeds update luci packages
-
-          # LuCI 运行时（不强制启用编译，只装符号链接）
           ./scripts/feeds install -p luci luci-base luci-compat
-
-          # lucihttp(目标包) 的构建依赖：meson/ninja/pkgconf/python3（host工具）
           ./scripts/feeds install -p packages meson ninja pkgconf python3
 
-      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          # 用 luci-base/src 的 Makefile 生成 po2lmo
-          test -d feeds/luci/modules/luci-base/src || {
-            echo "::error::luci-base src not found (check feeds branch openwrt-24.10)"
-            exit 1
-          }
-          make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
-
-          # 同时安装到 host/bin 与 hostpkg/bin（24.10 常用 hostpkg）
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
-
-          echo "== host bins =="
-          ls -l staging_dir/host/bin || true
-          echo "== hostpkg bins =="
-          ls -l staging_dir/hostpkg/bin || true
-
-          test -x staging_dir/host/bin/po2lmo
-          test -x staging_dir/hostpkg/bin/po2lmo
-
-          # 导出给后续 step
-          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
-          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
-
-      - name: "Build host tools for meson (python3/ninja/meson/pkgconf)"
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          # 逐个把 host 工具编进 staging_dir/hostpkg/bin
-          make -j"$(nproc)" V=sc package/feeds/packages/python3/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/ninja/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/meson/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/pkgconf/host/compile
-
-          # 放进 PATH，给后续 lucihttp/应用编译用
-          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
-
-      - name: Put our package into SDK (safe copy)
-        run: |
-          set -e
-          cd "$GITHUB_WORKSPACE"
-          PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
-          rm -rf "$PKGROOT"
-          mkdir -p "$PKGROOT"
-          # 用 tar 管道拷贝，避免“把仓库拷到自己里面”的循环错误
-          tar -cf - \
-            --exclude='./.git' \
-            --exclude="./$SDK_DIR" \
-            --exclude='./sdk' \
-            . \
-          | tar -C "$PKGROOT" -xf -
-
-      - name: Sanity check zh-cn PO domain
-        run: |
-          set -e
-          cd "$SDK_DIR/package/luci-app-nodemanager"
-          if [ ! -s po/zh-cn/nodemanager.po ]; then
-            echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"
-            exit 1
-          fi
-
+      # ⚠️ 把 defconfig 提前到这里（任何 make package 之前）
       - name: Seed .config & defconfig
         run: |
           set -e
@@ -131,78 +65,79 @@ jobs:
           EOF
           make defconfig
 
+      - name: Put our package into SDK (safe copy)
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE"
+          PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
+          rm -rf "$PKGROOT"
+          mkdir -p "$PKGROOT"
+          tar -cf - \
+            --exclude='./.git' \
+            --exclude="./$SDK_DIR" \
+            --exclude='./sdk' \
+            . \
+          | tar -C "$PKGROOT" -xf -
+
+      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          test -d feeds/luci/modules/luci-base/src || {
+            echo "::error::luci-base src not found"; exit 1; }
+          make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
+          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+
+      - name: "Build host tools for meson (python3/ninja/meson/pkgconf)"
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          make -j"$(nproc)" V=sc package/feeds/packages/python3/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/ninja/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/meson/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/pkgconf/host/compile
+          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
+
       - name: "Prebuild lucihttp (debug-friendly)"
         run: |
           set -e
           cd "$SDK_DIR"
-          # 确保 host 工具在 PATH
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-
-          # 单线程 + 详细日志预编 lucihttp
           set +e
           make -j1 V=s package/feeds/luci/lucihttp/compile
           RET=$?
           set -e
           if [ $RET -ne 0 ]; then
-            echo "==== lucihttp build logs (last 200 lines) ===="
+            echo "==== lucihttp build logs (last 200) ===="
             find build_dir -type f -name '*lucihttp*log*' -exec tail -n 200 {} \; || true
             exit $RET
           fi
+
+      - name: "Sanity check zh-cn PO domain"
+        run: |
+          set -e
+          cd "$SDK_DIR/package/luci-app-nodemanager"
+          test -s po/zh-cn/nodemanager.po || { echo "::error::missing po/zh-cn/nodemanager.po"; exit 1; }
 
       - name: "Build app + zh-cn i18n (force, debug on failure)"
         run: |
           set -e
           cd "$SDK_DIR"
-
-          # 确保当前 shell 的 PATH/PO2LMO 正确
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
-
-          echo "Using po2lmo: $(command -v po2lmo || true)"
-          test -x "$PO2LMO" || { echo "::error::po2lmo not found at $PO2LMO"; exit 1; }
-          po2lmo -h || true
-
-          # 预检：确认我们的包 Makefile 正确
-          PKGDIR="package/luci-app-nodemanager"
-          test -f "$PKGDIR/Makefile" || { echo "::error::$PKGDIR/Makefile missing"; exit 1; }
-          grep -q 'feeds/luci/luci.mk' "$PKGDIR/Makefile" || {
-            echo "::error::Makefile must include \`$(TOPDIR)/feeds/luci/luci.mk\`"; exit 1;
-          }
-
-          # 单线程 + 超详细日志编译，失败即 dump 关键信息
           set +e
           make -j1 V=s package/luci-app-nodemanager/compile
           RET=$?
           if [ $RET -ne 0 ]; then
-            echo "==== DUMP: possible build logs ===="
-            find build_dir -type f -name '*luci-app-nodemanager*log*' -printf '--- %p ---\n' -exec sed -n '1,200p' {} \; || true
-            echo "==== DUMP: grep error lines (last 200) ===="
-            find build_dir -type f -name '*luci-app-nodemanager*log*' -exec tail -n 200 {} \; | sed -n '/error:/I,$p' || true
-            echo "==== DUMP: env variables ===="
-            echo "PO2LMO=$PO2LMO"
-            echo "PATH=$PATH"
-            echo "PWD=$PWD"
-            echo "==== DUMP: which po2lmo ===="
-            which po2lmo || true
-            ls -l staging_dir/host/bin/po2lmo || true
-            ls -l staging_dir/hostpkg/bin/po2lmo || true
+            echo "==== DUMP luci-app logs ===="
+            find build_dir -type f -name '*luci-app-nodemanager*log*' -exec tail -n 200 {} \; || true
             exit $RET
           fi
-          set -e
-
-          # 显式构建中文语言包（兼容两种路径）
-          set +e
-          make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile
-          RET=$?
-          if [ $RET -ne 0 ]; then
-            make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
-            RET=$?
-          fi
-          if [ $RET -ne 0 ]; then
-            echo "==== DUMP: i18n build logs ===="
-            find build_dir -type f -name '*luci-i18n-nodemanager-zh-cn*log*' -printf '--- %p ---\n' -exec sed -n '1,200p' {} \; || true
-            exit $RET
-          fi
+          make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
+          make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect artifacts
         run: |
