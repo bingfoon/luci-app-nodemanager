@@ -12,6 +12,10 @@ LUCI_TITLE:=Node Manager
 LUCI_PKGARCH:=all
 LUCI_DEPENDS:=+luci-compat
 
+define Package/luci-app-nodemanager/conffiles
+/etc/config/nodemanager
+endef
+
 include $(TOPDIR)/feeds/luci/luci.mk   # <== 关键：用 luci.mk 自动处理 i18n
 
 # call BuildPackage - OpenWrt build system will create i18n subpackages automatically

@@ -99,31 +99,25 @@ end
 
 function action_settings()
 	local http = require "luci.http"
-	local uci  = require("luci.model.uci").cursor()
 	local util = require "luci.nodemanager.util"
 
 	if http.getenv("REQUEST_METHOD") == "POST" then
-		local path = http.formvalue("path") or ""
-		local tpl  = http.formvalue("template") or ""
-		path = (path:gsub("%s+$",""))
-		tpl  = (tpl:gsub("%s+$",""))
-
+		local path = (http.formvalue("path") or ""):gsub("%s+$","")
+		local tpl  = (http.formvalue("template") or ""):gsub("%s+$","")
 		if path == "" then return json({code=1, msg="Config path cannot be empty"}) end
-		uci:section("nodemanager", "config", "config", { path = path, template = tpl })
-		uci:commit("nodemanager")
-
+		util.set_settings(path, tpl)
 		if http.formvalue("create") == "1" then
-			local ok, p = util.ensure_file(path, tpl ~= "" and tpl or nil)
+			local ok, p = util.ensure_file(path, (tpl ~= "" and tpl or nil))
 			if not ok then return json({code=1, msg="Failed to create "..tostring(p)}) end
 		end
 		return json({code=0})
 	end
 
-	local path = uci:get("nodemanager","config","path") or ""
-	local tpl  = uci:get("nodemanager","config","template") or ""
+	local s = util.get_settings()
 	luci.template.render("nodemanager/settings", {
-		path  = path,
-		tpl   = tpl,
+		path  = s.path,
+		tpl   = s.template,
 		token = get_token()
 	})
 end
+

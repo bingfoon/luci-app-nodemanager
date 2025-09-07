@@ -1,10 +1,9 @@
 local fs   = require "nixio.fs"
 local sys  = require "luci.sys"
-local i18n = require "luci.i18n"
 
 local M = {}
 
--- Safety shim
+-- Safe insert shim (tolerate wrong arg order from legacy code)
 do
   local _insert = table.insert
   function table.insert(t, a, b)
@@ -14,11 +13,11 @@ do
   end
 end
 
--- ===== Defaults =====
+-- Defaults
 local DEFAULT_CFG = "/etc/nikki/profiles/config.yaml"
 local DEFAULT_TPL = "/usr/share/nodemanager/config.template.yaml"
 
--- ===== Helpers =====
+-- Helpers
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
 local function is_ipv4(s) return s and s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end
 local function is_hostname(s) return s and s:match("^[%w%-%.]+$") ~= nil end
@@ -32,19 +31,66 @@ local function strip_trailing_blank(lines)
   return lines
 end
 
-local function conf_path()
+-- UCI helpers (self-heal if package missing)
+local function uci_cursor()
+  return require("luci.model.uci").cursor()
+end
+
+local function ensure_uci_pkg()
   local uci = require("luci.model.uci").cursor()
-  local p = uci:get("nodemanager", "config", "path")
-  return (p and #p>0) and p or DEFAULT_CFG
+  -- if no /etc/config/nodemanager or no section, create one default 'main'
+  local sid = uci:get_first("nodemanager", "main") or uci:get_first("nodemanager", "config")
+  if not sid then
+    sid = uci:add("nodemanager", "main")
+    uci:set("nodemanager", sid, "path", DEFAULT_CFG)
+    uci:set("nodemanager", sid, "template", DEFAULT_TPL)
+    uci:commit("nodemanager")
+  end
+end
+
+local function read_uci_paths()
+  ensure_uci_pkg()
+  local uci = require("luci.model.uci").cursor()
+  local path = uci:get("nodemanager", "config", "path")
+  local tpl  = uci:get("nodemanager", "config", "template")
+  path = path or uci:get_first("nodemanager", "main", "path")
+  tpl  = tpl  or uci:get_first("nodemanager", "main", "template")
+  path = path or uci:get_first("nodemanager", "config", "path")
+  tpl  = tpl  or uci:get_first("nodemanager", "config", "template")
+  return path, tpl
+end
+
+function M.get_settings()
+  local p, t = read_uci_paths()
+  return { path = p or DEFAULT_CFG, template = t or DEFAULT_TPL }
+end
+
+function M.set_settings(path, template)
+  ensure_uci_pkg()
+  local uci = require("luci.model.uci").cursor()
+  local sid = uci:get_first("nodemanager", "main") or uci:get_first("nodemanager", "config")
+  if not sid then sid = uci:add("nodemanager", "main") end
+  if path and #path > 0 then uci:set("nodemanager", sid, "path", path) end
+  if template and #template > 0 then uci:set("nodemanager", sid, "template", template) end
+  uci:save("nodemanager")
+  uci:commit("nodemanager")
+end
+
+local function conf_path()
+  local p = read_uci_paths()
+  if type(p) == "table" then p = p[1] end
+  if not p or #p == 0 then p = DEFAULT_CFG end
+  return p
 end
 
 local function tpl_path()
-  local uci = require("luci.model.uci").cursor()
-  local t = uci:get("nodemanager", "config", "template")
-  return (t and #t>0) and t or DEFAULT_TPL
+  local _, t = read_uci_paths()
+  if type(t) == "table" then t = t[1] end
+  if not t or #t == 0 then t = DEFAULT_TPL end
+  return t
 end
 
--- Full fallback template (non-empty)
+-- Template fallback
 local function fallback_template()
   return [===[
 airport: &airport
@@ -233,29 +279,29 @@ rule-providers:
   telegram_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
   netflix_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
   apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
-
 ]===]
 end
 
--- Exported: ensure config file exists (optionally using overrides)
+-- Ensure target config file exists, use template or fallback
 function M.ensure_file(path_override, tpl_override)
+  ensure_uci_pkg()
   local path = path_override or conf_path()
   if fs.access(path) then return true, path end
   local dir = path:match("^(.+)/[^/]+$") or "/"
   sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
   local t = tpl_override or tpl_path()
-  local content = fs.readfile(t) or fallback_template()
+  local content = fs.readfile(t)
+  if not content or #trim(content) == 0 then content = fallback_template() end
   fs.writefile(path, content)
   return fs.access(path), path
 end
 
--- Internal ensure (uses UCI)
+-- File IO
 local function ensure_config_exists()
   local ok, p = M.ensure_file()
   return p
 end
 
--- Read/write helpers
 local function read_lines(path)
   path = path or ensure_config_exists()
   local s = fs.readfile(path) or ""
@@ -278,14 +324,13 @@ local function write_lines(lines, path)
   return fs.writefile(path, table.concat(lines, "\n").."\n")
 end
 
--- Anchor helpers
+-- YAML-ish range helpers
 local function ensure_anchor_block(lines, header, start_hint, end_hint)
   local header_pat = "^%s*" .. header .. ":%s*$"
   local header_idx
   for i,l in ipairs(lines) do
     if l:match(header_pat) then header_idx = i; break end
   end
-
   if not header_idx then
     if #lines > 0 and lines[#lines] ~= "" then table.insert(lines, "") end
     table.insert(lines, header .. ":")
@@ -293,19 +338,16 @@ local function ensure_anchor_block(lines, header, start_hint, end_hint)
     table.insert(lines, "  # " .. end_hint)
     return lines
   end
-
   local block_end = #lines
   for i = header_idx + 1, #lines do
     if lines[i]:match("^%S") then block_end = i - 1; break end
   end
-
   local has_start, has_end = false, false
   for i = header_idx + 1, block_end do
     if lines[i]:find(start_hint, 1, true) then has_start = true end
     if lines[i]:find(end_hint,   1, true) then has_end   = true end
   end
   if has_start and has_end then return lines end
-
   local out = {}
   for i=1,#lines do
     table.insert(out, lines[i])
@@ -441,7 +483,7 @@ function M.load_all()
   return { proxies = proxies, bindmap = bindmap, providers = providers, dns_servers = dns_servers }
 end
 
--- ===== Form parsing & validation =====
+-- Forms parsing
 function M.parse_proxy_form(form)
   local names     = form["name[]"]      or form.name
   local servers   = form["server[]"]    or form.server
@@ -470,17 +512,17 @@ function M.parse_proxy_form(form)
     local all_blank = (n=="" and s=="" and ptxt=="" and u=="" and w=="" and field=="")
     if not all_blank then
       if n=="" or s=="" or u=="" or w=="" or ptxt=="" then
-        return false,nil,i18n.translatef("Row %d has empty required fields", i)
+        return false,nil,string.format("Row %d has empty required fields", i)
       end
       local p = tonumber(ptxt)
       if not is_port(p) then
-        return false,nil, i18n.translatef("Invalid port at row %d", i)
+        return false,nil, string.format("Invalid port at row %d", i)
       end
       if not (is_hostname(s) or is_ipv4(s)) then
-        return false,nil, i18n.translatef("Invalid server at row %d", i)
+        return false,nil, string.format("Invalid server at row %d", i)
       end
       if name_seen[n] then
-        return false,nil, i18n.translatef("Duplicate node name at row %d: %s", i, n)
+        return false,nil, string.format("Duplicate node name at row %d: %s", i, n)
       end
       name_seen[n]=i
 
@@ -489,10 +531,10 @@ function M.parse_proxy_form(form)
         for token in field:gmatch("[^,%s\r\n]+") do
           local ip = trim(token)
           if not is_ipv4(ip) then
-            return false,nil, i18n.translatef("Invalid bind IP at row %d: %s", i, ip)
+            return false,nil, string.format("Invalid bind IP at row %d: %s", i, ip)
           end
           if ip_seen[ip] and ip_seen[ip] ~= i then
-            return false,nil, i18n.translatef("IP %s is assigned to multiple nodes (rows %d and %d)", ip, ip_seen[ip], i)
+            return false,nil, string.format("IP %s is assigned to multiple nodes (rows %d and %d)", ip, ip_seen[ip], i)
           end
           ip_seen[ip]=i
           table.insert(ips, ip)
@@ -518,13 +560,13 @@ function M.parse_provider_form(form)
     local all_blank = (n=="" and u=="")
     if not all_blank then
       if n=="" or u=="" then
-        return false, nil, i18n.translatef("Row %d has empty required fields", i)
+        return false, nil, string.format("Row %d has empty required fields", i)
       end
       if not is_http_url(u) then
-        return false, nil, i18n.translatef("Invalid URL at row %d", i)
+        return false, nil, string.format("Invalid URL at row %d", i)
       end
       if seen[n] then
-        return false, nil, i18n.translatef("Duplicate name at row %d: %s", i, n)
+        return false, nil, string.format("Duplicate name at row %d: %s", i, n)
       end
       seen[n]=true
       table.insert(list, { name=n, url=u })
@@ -541,16 +583,15 @@ function M.parse_dns_form(form)
     local ip = trim(dns[i] or "")
     if ip ~= "" then
       if not is_ipv4(ip) then
-        return false, nil, i18n.translatef("Invalid DNS IP at row %d: %s", i, ip)
+        return false, nil, string.format("Invalid DNS IP at row %d: %s", i, ip)
       end
       table.insert(list, ip)
     end
   end
-  if #list==0 then return false, nil, i18n.translate("Fields cannot be empty") end
+  if #list==0 then return false, nil, "Fields cannot be empty" end
   return true, list
 end
 
--- ===== Save =====
 function M.save_proxies_and_rules(list)
   local lines = read_lines()
 
@@ -561,10 +602,8 @@ function M.save_proxies_and_rules(list)
     "落地节点对应的子网设备添加在下面",
     "落地节点对应的子网设备添加在上面")
 
-  local ps,pe = find_range(lines, "落地节点信息从下面开始添加", "落地节点信息必须添加在这一行上面")
+  local ps, pe = find_range(lines, "落地节点信息从下面开始添加", "落地节点信息必须添加在这一行上面")
   if not (ps and pe) then return false, "Cannot locate proxies range in config.yaml" end
-  local rs,re = find_range(lines, "落地节点对应的子网设备添加在下面", "落地节点对应的子网设备添加在上面")
-  if not (rs and re) then return false, "Cannot locate rules range in config.yaml" end
 
   local newp = {}
   for _,x in ipairs(list) do
@@ -573,39 +612,55 @@ function M.save_proxies_and_rules(list)
       x.name, x.server, x.port, x.username, x.password))
   end
 
-  local newr = {}
+  do
+    local out = {}
+    for i=1,#lines do
+      if i==ps then
+        for _,l in ipairs(newp) do table.insert(out, l) end
+      end
+      if i>=ps and i<=pe then
+      else
+        table.insert(out, lines[i])
+      end
+    end
+    lines = out
+  end
+
+  local rs, re = find_range(lines, "落地节点对应的子网设备添加在下面", "落地节点对应的子网设备添加在上面")
+  if not (rs and re) then return false, "Cannot locate rules range in config.yaml" end
+
+  local newr, seen = {}, {}
   for _,x in ipairs(list) do
     if x.bindips and #x.bindips>0 then
+      local local_seen = {}
       for _,ip in ipairs(x.bindips) do
-        table.insert(newr, string.format('  - SRC-IP-CIDR,%s/32,%s', ip, x.name))
+        if not local_seen[ip] then
+          local pair = ip .. "\0" .. x.name
+          if not seen[pair] then
+            table.insert(newr, string.format('  - SRC-IP-CIDR,%s/32,%s', ip, x.name))
+            seen[pair] = true
+          end
+          local_seen[ip] = true
+        end
       end
     end
   end
 
-  local out = {}
-  for i=1,#lines do
-    if i==ps then
-      for _,l in ipairs(newp) do table.insert(out, l) end
+  do
+    local out = {}
+    for i=1,#lines do
+      if i==rs then
+        for _,l in ipairs(newr) do table.insert(out, l) end
+      end
+      if i>=rs and i<=re then
+      else
+        table.insert(out, lines[i])
+      end
     end
-    if i>=ps and i<=pe then
-    else
-      table.insert(out, lines[i])
-    end
-  end
-  lines = out
-  out = {}
-
-  for i=1,#lines do
-    if i==rs then
-      for _,l in ipairs(newr) do table.insert(out, l) end
-    end
-    if i>=rs and i<=re then
-    else
-      table.insert(out, lines[i])
-    end
+    lines = out
   end
 
-  return write_lines(out) ~= nil, nil
+  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(lines), "\n").."\n") ~= nil), nil
 end
 
 function M.save_providers(list)
@@ -632,7 +687,7 @@ function M.save_providers(list)
     table.insert(out, string.format('    url: "%s"', p.url))
   end
   for i=end_idx+1,#lines do table.insert(out, lines[i]) end
-  return write_lines(out) ~= nil, nil
+  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
 end
 
 function M.save_dns_servers(servers)
@@ -646,7 +701,7 @@ function M.save_dns_servers(servers)
     table.insert(lines, "dns:")
     table.insert(lines, "  nameserver:")
     for _,ip in ipairs(servers) do table.insert(lines, string.format("    - %s", ip)) end
-    return write_lines(lines) ~= nil, nil
+    return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(lines), "\n").."\n") ~= nil), nil
   end
 
   local ns_start, ns_end
@@ -674,7 +729,7 @@ function M.save_dns_servers(servers)
         for _,ip in ipairs(servers) do table.insert(out, string.format("    - %s", ip)) end
       end
     end
-    return write_lines(out) ~= nil, nil
+    return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
   end
 
   local out = {}
@@ -683,9 +738,10 @@ function M.save_dns_servers(servers)
     table.insert(out, string.format("    - %s", ip))
   end
   for i=(ns_end or ns_start)+1,#lines do table.insert(out, lines[i]) end
-  return write_lines(out) ~= nil, nil
+  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
 end
 
 function M.conf_path() return conf_path() end
 
 return M
+
