@@ -45,7 +45,8 @@ jobs:
           fi
           echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
           ./scripts/feeds update luci
-          ./scripts/feeds install -p luci luci-base luci-compat po2lmo
+          # luci-base/luci-compat 提供 LuCI 运行时；po2lmo 将作为 luci-base 的 host 工具构建
+          ./scripts/feeds install -p luci luci-base luci-compat
 
       - name: Put our package into SDK (safe copy)
         run: |
@@ -72,35 +73,12 @@ jobs:
           EOF
           make defconfig
 
-      - name: Detect po2lmo path
-        id: detect
+      - name: Build luci-base host tools (po2lmo)
         run: |
           set -e
           cd "$SDK_DIR"
-          echo "=== Probe po2lmo directories ==="
-          ls -al package 2>/dev/null || true
-          ls -al package/feeds 2>/dev/null || true
-          ls -al package/feeds/luci 2>/dev/null || true
-          ls -al package/feeds/luci/po2lmo 2>/dev/null || true
-          ls -al package/po2lmo 2>/dev/null || true
-
-          if [ -d package/feeds/luci/po2lmo ]; then
-            TGT="package/feeds/luci/po2lmo/host/compile"
-          elif [ -d package/po2lmo ]; then
-            TGT="package/po2lmo/host/compile"
-          else
-            echo "::error::po2lmo package not found after feeds install"
-            exit 1
-          fi
-
-          echo "PO2LMO_TGT=$TGT" | tee -a "$GITHUB_ENV"
-          echo "Using po2lmo target: $TGT"
-
-      - name: Build po2lmo (host tool)
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          make "$PO2LMO_TGT" -j$(nproc) V=sc
+          # 在 24.10 分支，po2lmo 由 luci-base 的 HostBuild 提供
+          make package/feeds/luci/luci-base/host/compile -j$(nproc) V=sc
           test -x staging_dir/host/bin/po2lmo || { echo "::error::po2lmo host tool missing"; exit 1; }
 
       - name: Sanity check zh-cn PO domain
@@ -117,9 +95,8 @@ jobs:
           set -e
           cd "$SDK_DIR"
           make package/luci-app-nodemanager/compile -j$(nproc) V=sc
-          # i18n 目标路径可能在 feeds 名字空间内，两个都尝试
-          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
-          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
+          # i18n 子包名固定：luci-i18n-<app>-<lang>
+          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || true
 
       - name: Collect artifacts
         run: |
