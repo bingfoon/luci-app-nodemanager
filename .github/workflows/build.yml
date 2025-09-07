@@ -49,38 +49,24 @@ jobs:
           SDK_ARCHIVE="$(basename "$SDK_URL")"
           wget -q "$SDK_URL" -O "$SDK_ARCHIVE"
 
-          mkdir -p sdk
-          case "$SDK_ARCHIVE" in
-            *.tar.zst)
-              # tar 支持 zstd 时优先用 --zstd；否则用 unzstd 管道
-              if tar --help | grep -q -- '--zstd'; then
-                tar --zstd -xvf "$SDK_ARCHIVE" -C sdk --strip-components=1
-              else
-                unzstd -c "$SDK_ARCHIVE" | tar xvf - -C sdk --strip-components=1
-              fi
-              ;;
-            *.tar.xz)
-              tar -xJf "$SDK_ARCHIVE" -C sdk --strip-components=1
-              ;;
-            *)
-              echo "Unknown SDK archive format: $SDK_ARCHIVE"
-              exit 1
-              ;;
-          esac
+      - name: Extract SDK
+        shell: bash
+        run: |
+          tar --zstd -xf openwrt-sdk-*.tar.zst
+          echo "SDK_DIR=$(echo openwrt-sdk-*)" >> $GITHUB_ENV
 
       - name: Bootstrap feeds if missing
         shell: bash
         run: |
           cd "$SDK_DIR"
-          # 有些 SDK 不带 scripts/feeds，缺就在线抓一份
           if [ ! -x scripts/feeds ]; then
             BRANCH="openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)"   # 24.10.2 -> openwrt-24.10
             mkdir -p scripts
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
+            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
-            # 最小 feeds，仅 luci（够生成 luci.mk 和 po2lmo/host）
             cat > feeds.conf <<EOF
-            src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
           EOF
           fi
 
@@ -89,7 +75,7 @@ jobs:
         run: |
           cd "$SDK_DIR"
           ./scripts/feeds update -a
-          ./scripts/feeds install -a    # 或至少：./scripts/feeds install luci luci-compat
+          ./scripts/feeds install luci luci-compat  # 或用：./scripts/feeds install -a
 
       - name: Add package source
         shell: bash
@@ -112,7 +98,7 @@ jobs:
         shell: bash
         run: |
           cd "$SDK_DIR"
-          make package/luci-app-nodemanager/{clean,compile} V=s
+          make package/luci-app-nodemanager/{clean,compile} V=s -j$(nproc)
           find bin/ -name 'luci-app-nodemanager*_all.ipk' -o -name 'luci-i18n-nodemanager-*_all.ipk' -print
 
       - name: Upload ipk
