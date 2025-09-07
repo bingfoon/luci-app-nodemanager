@@ -51,14 +51,14 @@ jobs:
         run: |
           set -e
           cd "$SDK_DIR"
-          # 直接用 luci-base 的 src 目录 Makefile 生成 po2lmo
+          # 用 luci-base/src 的 Makefile 生成 po2lmo
           test -d feeds/luci/modules/luci-base/src || {
             echo "::error::luci-base src not found (check feeds branch openwrt-24.10)"
             exit 1
           }
           make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
 
-          # 同时安装到 host/bin 与 hostpkg/bin（24.10 下很多工具用 hostpkg）
+          # 同时安装到 host/bin 与 hostpkg/bin
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
 
@@ -70,8 +70,9 @@ jobs:
           test -x staging_dir/host/bin/po2lmo
           test -x staging_dir/hostpkg/bin/po2lmo
 
-          # 让后续 make 能直接找到
+          # 让后续 step 默认能找到
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
       - name: Put our package into SDK (safe copy)
         run: |
@@ -108,12 +109,24 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build app + zh-cn i18n (force)
+      - name: "Build app + zh-cn i18n (force)"
         run: |
           set -e
           cd "$SDK_DIR"
+
+          # 确保当前 shell 的 PATH/PO2LMO 正确
+          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
+
+          echo "Using po2lmo: $(command -v po2lmo || true)"
+          test -x "$PO2LMO" || { echo "::error::po2lmo not found at $PO2LMO"; exit 1; }
+          po2lmo -h || true
+
+          # 先 clean 再编译主包
+          make package/luci-app-nodemanager/clean V=sc || true
           make package/luci-app-nodemanager/compile -j"$(nproc)" V=sc
-          # 显式构建中文语言包；兼容不同 feeds 命名
+
+          # 再显式编译中文语言包（两条路径兼容不同 feeds 命名）
           make package/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc || \
           make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc
 
