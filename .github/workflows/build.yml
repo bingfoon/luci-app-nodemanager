@@ -37,7 +37,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (luci only, openwrt-24.10)
+      - name: Setup feeds (luci + packages, openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -48,8 +48,11 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
-          ./scripts/feeds update luci
+          cat > feeds.conf <<EOF
+          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
+          EOF
+          ./scripts/feeds update luci packages
           ./scripts/feeds install -p luci luci-base luci-compat
 
       - name: Seed .config & defconfig
@@ -58,10 +61,8 @@ jobs:
           cd "$SDK_DIR"
           cat >> .config <<'EOF'
           CONFIG_TARGET_IMAGES_GZIP=y
-          # 我们的主包 + 中文语言包
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
-          # 预先把 liblua 也选上（确保 staging1 次性就有头文件）
           CONFIG_PACKAGE_liblua=y
           EOF
           make defconfig
@@ -73,7 +74,6 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-          # 用 tar 管道拷贝，避免“把仓库拷进自己”的循环错误
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -81,7 +81,7 @@ jobs:
             . \
           | tar -C "$PKGROOT" -xf -
 
-      - name: Build po2lmo (via luci src Makefile -> host+hostpkg)
+      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
         run: |
           set -e
           cd "$SDK_DIR"
@@ -94,7 +94,7 @@ jobs:
           test -x staging_dir/host/bin/po2lmo
           test -x staging_dir/hostpkg/bin/po2lmo
 
-      - name: Symlink system tools into staging (meson/ninja/pkg-config/python3)
+      - name: "Symlink system tools into staging (idempotent)"
         run: |
           set -e
           cd "$SDK_DIR"
@@ -116,24 +116,31 @@ jobs:
               fi
             done
           done
-          # 导出 PATH / PO2LMO
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # ⬇⬇⬇ 关键修复：先把目标端 Lua 编译出来，提供 lua.h / lua5.1.pc
-      - name: Build target liblua (headers for lucihttp)
+      # 关键修复：先把目标端 liblua 放进 staging（提供 lua.h / lua5.1.pc）
+      - name: "Build target liblua (headers for lucihttp; try core, then feeds)"
         run: |
           set -e
           cd "$SDK_DIR"
-          # 直接编 OpenWrt 源里的 lua（位于 package/utils/lua）
-          make -j"$(nproc)" V=sc package/utils/lua/compile
+          # 尝试核心树 liblua
+          if make -j"$(nproc)" V=sc package/libs/lua/compile; then
+            echo "::notice::built core package/libs/lua"
+          else
+            echo "::warning::core package/libs/lua not found, fallback to feeds/packages"
+            # 保证 packages feed 已存在（前面已配置），安装 lua 描述
+            ./scripts/feeds install -p packages lua || ./scripts/feeds install -p packages lua5.1 || true
+            # 逐个尝试 feeds 下的 lua 名称
+            make -j"$(nproc)" V=sc package/feeds/packages/lua/compile || \
+            make -j"$(nproc)" V=sc package/feeds/packages/lua5.1/compile
+          fi
 
-      - name: Prebuild lucihttp (debug-friendly)
+      - name: "Prebuild lucihttp (debug-friendly)"
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          # 单线程 + 详细日志，失败时输出关键日志
           set +e
           make -j1 V=s package/feeds/luci/lucihttp/compile
           RET=$?
@@ -144,13 +151,13 @@ jobs:
             exit $RET
           fi
 
-      - name: Sanity check zh-cn PO domain
+      - name: "Sanity check zh-cn PO domain"
         run: |
           set -e
           cd "$SDK_DIR/package/luci-app-nodemanager"
           test -s po/zh-cn/nodemanager.po || { echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"; exit 1; }
 
-      - name: Build app + zh-cn i18n (force, debug on failure)
+      - name: "Build app + zh-cn i18n (force, debug on failure)"
         run: |
           set -e
           cd "$SDK_DIR"
@@ -160,7 +167,6 @@ jobs:
           echo "Using po2lmo: $(command -v po2lmo || true)"
           po2lmo -h || true
 
-          # 主包
           set +e
           make -j1 V=s package/luci-app-nodemanager/compile
           RET=$?
@@ -170,7 +176,6 @@ jobs:
             exit $RET
           fi
 
-          # 中文语言包（两条路径兼容）
           make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
           make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
           RET=$?
