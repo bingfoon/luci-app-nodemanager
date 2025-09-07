@@ -68,8 +68,8 @@ jobs:
             chmod +x scripts/feeds
             # 注意：EOF 行前不能有缩进！
             cat > feeds.conf <<EOF
-src-git luci https://github.com/openwrt/luci.git;${BRANCH}
-EOF
+            src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+            EOF
           fi
 
       - name: Prepare feeds
