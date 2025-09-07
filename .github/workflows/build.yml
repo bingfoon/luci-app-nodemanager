@@ -14,8 +14,8 @@ jobs:
         target:
           - name: mediatek-filogic
             sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          #- name: x86-64
-          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - name: x86-64
+            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -70,7 +70,6 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-          # 用 tar 管道拷贝，避免把仓库拷到自己内部
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -90,22 +89,38 @@ jobs:
           echo "== hostpkg bins =="; ls -l staging_dir/hostpkg/bin || true
           test -x staging_dir/host/bin/po2lmo
           test -x staging_dir/hostpkg/bin/po2lmo
-          # 导出 PATH/PO2LMO 给后续步骤
-          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
-          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+          # 暂不修改 PATH，避免影响后面系统工具定位
 
-      - name: Symlink system tools into staging (meson/ninja/pkg-config/python3)
+      - name: Symlink system tools into staging (idempotent)
         run: |
           set -e
           cd "$SDK_DIR"
           mkdir -p staging_dir/hostpkg/bin staging_dir/host/bin
+
+          # 强制用系统 PATH 找工具，避免命中 staging 里的同名可执行
+          SYS_PATH="/usr/sbin:/usr/bin:/sbin:/bin"
           for t in meson ninja pkg-config python3; do
-            SYS=$(command -v "$t" || true)
-            [ -x "$SYS" ] || { echo "::error::system tool $t not found"; exit 1; }
-            ln -sf "$SYS" "staging_dir/hostpkg/bin/$t"
-            ln -sf "$SYS" "staging_dir/host/bin/$t"
+            SYS_BIN="$(env PATH="$SYS_PATH" command -v "$t" || true)"
+            [ -x "$SYS_BIN" ] || { echo "::error::system tool $t not found"; exit 1; }
+
+            for dst in "staging_dir/hostpkg/bin/$t" "staging_dir/host/bin/$t"; do
+              mkdir -p "$(dirname "$dst")"
+              # 若已指向同一真实文件则跳过；否则重建软链
+              DST_REAL="$(readlink -f "$dst" 2>/dev/null || echo '')"
+              SYS_REAL="$(readlink -f "$SYS_BIN")"
+              if [ "$DST_REAL" = "$SYS_REAL" ]; then
+                echo "skip linking $dst (already -> $SYS_REAL)"
+              else
+                rm -f "$dst"
+                ln -s "$SYS_BIN" "$dst"
+                echo "linked $dst -> $SYS_BIN"
+              fi
+            done
           done
+
+          # 现在把 staging 放入 PATH 供后续构建使用
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
       - name: Prebuild lucihttp (debug-friendly)
         run: |
