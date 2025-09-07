@@ -9,8 +9,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          #- name: mediatek-filogic
-          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - name: mediatek-filogic
+            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           - name: x86-64
             sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
@@ -21,7 +21,7 @@ jobs:
       - name: Install minimal deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl gcc
+          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl
 
       - name: Download & extract SDK
         run: |
@@ -45,10 +45,9 @@ jobs:
           fi
           cat > feeds.conf <<'EOF'
           src-git luci https://github.com/openwrt/luci.git;openwrt-24.10
-          # 预留 core（需要时可启用）；本流程不强制编译其包，避免引入额外失败点
-          src-git core https://github.com/openwrt/openwrt.git;openwrt-24.10
+          # 仅保留 luci 源，避免引入无关包导致编译失败
           EOF
-          ./scripts/feeds update luci core
+          ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
       - name: Remove lucihttp family to avoid lua/meson/ninja deps
@@ -57,14 +56,14 @@ jobs:
           cd "$SDK_DIR"
           rm -rf feeds/luci/contrib/package/lucihttp || true
 
-      - name: Initialize toolchain defconfig (no world packages)
+      - name: Init defconfig (no world build)
         run: |
           set -e
           cd "$SDK_DIR"
           : > .config
           make defconfig
 
-      - name: Copy our package into SDK
+      - name: Copy our package into SDK/package
         run: |
           set -e
           cd "$GITHUB_WORKSPACE"
@@ -75,25 +74,16 @@ jobs:
             --exclude '.github' \
             --exclude 'sdk' \
             --exclude "$SDK_DIR" \
+            --exclude 'out' \
             ./ "$PKGROOT/"
-
-      - name: Normalize package layout (auto-fix nested dir)
-        run: |
-          set -e
-          cd "$SDK_DIR/package"
-          if [ ! -f luci-app-nodemanager/Makefile ]; then
-            if [ -f luci-app-nodemanager/luci-app-nodemanager/Makefile ]; then
-              echo "Flatten nested luci-app-nodemanager/..."
-              rsync -a luci-app-nodemanager/luci-app-nodemanager/ luci-app-nodemanager/
-              rm -rf luci-app-nodemanager/luci-app-nodemanager
-            else
-              echo "::error::Makefile not found in package/luci-app-nodemanager"
-              find luci-app-nodemanager -maxdepth 3 -type f -name 'Makefile' -print || true
-              exit 1
-            fi
+          # 若存在二级嵌套 luci-app-nodemanager/luci-app-nodemanager，自动扁平化
+          if [ ! -f "$PKGROOT/Makefile" ] && [ -f "$PKGROOT/luci-app-nodemanager/Makefile" ]; then
+            rsync -a "$PKGROOT/luci-app-nodemanager/" "$PKGROOT/"
+            rm -rf "$PKGROOT/luci-app-nodemanager"
           fi
+          test -f "$PKGROOT/Makefile" || { echo "::error::Makefile not found in package/luci-app-nodemanager"; find "$PKGROOT" -maxdepth 3 -name Makefile; exit 1; }
           echo "== package tree =="
-          find luci-app-nodemanager -maxdepth 2 -type f -print
+          find "$PKGROOT" -maxdepth 2 -type f -print
 
       - name: Build po2lmo (host tool; required for zh-cn)
         run: |
@@ -106,19 +96,26 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      - name: Compile ONLY our package (and its i18n subpackages)
+      - name: Enable our package in .config
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          echo 'CONFIG_PACKAGE_luci-app-nodemanager=y' >> .config
+          make defconfig
+          grep -n 'CONFIG_PACKAGE_luci-app-nodemanager' .config
+
+      - name: Compile ONLY our package (and i18n)
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
           make -j"$(nproc)" V=s package/luci-app-nodemanager/compile
-          make -j1 V=s package/luci-app-nodemanager/install
-          echo "::group::IPK list"
+          echo "::group::IPKs under bin/"
           find bin -type f -name 'luci-app-nodemanager_*.ipk' -o -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -print
           echo "::endgroup::"
 
-      - name: Collect artifacts (robust)
+      - name: Collect artifacts
         run: |
           set -e
           cd "$SDK_DIR"
