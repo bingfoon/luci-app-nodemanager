@@ -47,6 +47,18 @@ jobs:
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
+      - name: Build po2lmo (manually from luci source)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 直接用 luci 源码的 po2lmo 工程编译
+          make -C feeds/luci/modules/luci-base/src/po2lmo
+          mkdir -p staging_dir/host/bin
+          cp -vf feeds/luci/modules/luci-base/src/po2lmo/po2lmo staging_dir/host/bin/po2lmo
+          echo "== staging_dir/host/bin =="
+          ls -l staging_dir/host/bin
+          test -x staging_dir/host/bin/po2lmo
+
       - name: Put our package into SDK (safe copy)
         run: |
           set -e
@@ -54,12 +66,22 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
+          # 用 tar 管道拷贝，避免把仓库拷进自己
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
             --exclude='./sdk' \
             . \
           | tar -C "$PKGROOT" -xf -
+
+      - name: Sanity check zh-cn PO domain
+        run: |
+          set -e
+          cd "$SDK_DIR/package/luci-app-nodemanager"
+          if [ ! -s po/zh-cn/nodemanager.po ]; then
+            echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"
+            exit 1
+          fi
 
       - name: Seed .config & defconfig
         run: |
@@ -72,30 +94,12 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build luci-base host tools (installs po2lmo)
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          # 关键：必须 host/install 才会把 po2lmo 安到 staging_dir/host/bin/
-          make package/feeds/luci/luci-base/host/install -j$(nproc) V=sc
-          echo "== staging_dir/host/bin contents =="
-          ls -l staging_dir/host/bin || true
-          test -x staging_dir/host/bin/po2lmo || { echo "::error::po2lmo host tool missing"; exit 1; }
-
-      - name: Sanity check zh-cn PO domain
-        run: |
-          set -e
-          cd "$SDK_DIR/package/luci-app-nodemanager"
-          if [ ! -s po/zh-cn/nodemanager.po ]; then
-            echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"
-            exit 1
-          fi
-
       - name: Build app + zh-cn i18n
         run: |
           set -e
           cd "$SDK_DIR"
           make package/luci-app-nodemanager/compile -j$(nproc) V=sc
+          # 显式构建中文语言包（两条路径都尝试，兼容不同 feed 命名）
           make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
           make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
 
