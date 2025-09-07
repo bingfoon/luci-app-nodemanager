@@ -58,7 +58,7 @@ jobs:
           }
           make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
 
-          # 同时安装到 host/bin 与 hostpkg/bin
+          # 同时安装到 host/bin 与 hostpkg/bin（24.10 常用 hostpkg）
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
 
@@ -70,7 +70,7 @@ jobs:
           test -x staging_dir/host/bin/po2lmo
           test -x staging_dir/hostpkg/bin/po2lmo
 
-          # 让后续 step 默认能找到
+          # 导出给后续 step
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
@@ -109,7 +109,7 @@ jobs:
           EOF
           make defconfig
 
-      - name: "Build app + zh-cn i18n (force)"
+      - name: "Build app + zh-cn i18n (force, debug on failure)"
         run: |
           set -e
           cd "$SDK_DIR"
@@ -122,13 +122,47 @@ jobs:
           test -x "$PO2LMO" || { echo "::error::po2lmo not found at $PO2LMO"; exit 1; }
           po2lmo -h || true
 
-          # 先 clean 再编译主包
-          make package/luci-app-nodemanager/clean V=sc || true
-          make package/luci-app-nodemanager/compile -j"$(nproc)" V=sc
+          # 预检：确认我们的包 Makefile 正确
+          PKGDIR="package/luci-app-nodemanager"
+          test -f "$PKGDIR/Makefile" || { echo "::error::$PKGDIR/Makefile missing"; exit 1; }
+          grep -q 'feeds/luci/luci.mk' "$PKGDIR/Makefile" || {
+            echo "::error::Makefile must include \`$(TOPDIR)/feeds/luci/luci.mk\`"; exit 1;
+          }
 
-          # 再显式编译中文语言包（两条路径兼容不同 feeds 命名）
-          make package/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc || \
-          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc
+          # 单线程 + 超详细日志编译，失败即 dump 关键信息
+          set +e
+          make -j1 V=s package/luci-app-nodemanager/compile
+          RET=$?
+          if [ $RET -ne 0 ]; then
+            echo "==== DUMP: possible build logs ===="
+            find build_dir -type f -name '*luci-app-nodemanager*log*' -printf '--- %p ---\n' -exec sed -n '1,200p' {} \; || true
+            echo "==== DUMP: grep error lines (last 200) ===="
+            find build_dir -type f -name '*luci-app-nodemanager*log*' -exec tail -n 200 {} \; | sed -n '/error:/I,$p' || true
+            echo "==== DUMP: env variables ===="
+            echo "PO2LMO=$PO2LMO"
+            echo "PATH=$PATH"
+            echo "PWD=$PWD"
+            echo "==== DUMP: which po2lmo ===="
+            which po2lmo || true
+            ls -l staging_dir/host/bin/po2lmo || true
+            ls -l staging_dir/hostpkg/bin/po2lmo || true
+            exit $RET
+          fi
+          set -e
+
+          # 显式构建中文语言包（兼容两种路径）
+          set +e
+          make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile
+          RET=$?
+          if [ $RET -ne 0 ]; then
+            make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
+            RET=$?
+          fi
+          if [ $RET -ne 0 ]; then
+            echo "==== DUMP: i18n build logs ===="
+            find build_dir -type f -name '*luci-i18n-nodemanager-zh-cn*log*' -printf '--- %p ---\n' -exec sed -n '1,200p' {} \; || true
+            exit $RET
+          fi
 
       - name: Collect artifacts
         run: |
