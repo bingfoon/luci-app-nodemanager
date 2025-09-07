@@ -6,7 +6,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      TERM: xterm   # 防止某些脚本意外尝试 menuconfig 时找不到终端
+      TERM: xterm
+
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +21,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Install build deps (incl. meson/ninja/pkg-config/python3)
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip libncurses5-dev zstd rsync file curl gcc
+          sudo apt-get install -y \
+            build-essential gawk unzip libncurses5-dev zstd rsync file curl gcc \
+            ninja-build meson pkg-config python3
 
       - name: Download & extract SDK
         run: |
@@ -34,7 +37,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (luci + packages, openwrt-24.10)
+      - name: Setup feeds (luci only, openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -45,15 +48,10 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          cat > feeds.conf <<EOF
-          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
-          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
-          EOF
-          ./scripts/feeds update luci packages
+          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
+          ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
-          ./scripts/feeds install -p packages meson ninja pkgconf python3
 
-      # ⚠️ 把 defconfig 提前到这里（任何 make package 之前）
       - name: Seed .config & defconfig
         run: |
           set -e
@@ -72,6 +70,7 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
+          # 用 tar 管道拷贝，避免把仓库拷到自己内部
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -79,29 +78,36 @@ jobs:
             . \
           | tar -C "$PKGROOT" -xf -
 
-      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
+      - name: Build po2lmo (via luci src Makefile -> host+hostpkg)
         run: |
           set -e
           cd "$SDK_DIR"
-          test -d feeds/luci/modules/luci-base/src || {
-            echo "::error::luci-base src not found"; exit 1; }
+          test -d feeds/luci/modules/luci-base/src || { echo "::error::luci-base src not found"; exit 1; }
           make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
+          echo "== host bins ==";    ls -l staging_dir/host/bin    || true
+          echo "== hostpkg bins =="; ls -l staging_dir/hostpkg/bin || true
+          test -x staging_dir/host/bin/po2lmo
+          test -x staging_dir/hostpkg/bin/po2lmo
+          # 导出 PATH/PO2LMO 给后续步骤
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      - name: "Build host tools for meson (python3/ninja/meson/pkgconf)"
+      - name: Symlink system tools into staging (meson/ninja/pkg-config/python3)
         run: |
           set -e
           cd "$SDK_DIR"
-          make -j"$(nproc)" V=sc package/feeds/packages/python3/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/ninja/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/meson/host/compile
-          make -j"$(nproc)" V=sc package/feeds/packages/pkgconf/host/compile
+          mkdir -p staging_dir/hostpkg/bin staging_dir/host/bin
+          for t in meson ninja pkg-config python3; do
+            SYS=$(command -v "$t" || true)
+            [ -x "$SYS" ] || { echo "::error::system tool $t not found"; exit 1; }
+            ln -sf "$SYS" "staging_dir/hostpkg/bin/$t"
+            ln -sf "$SYS" "staging_dir/host/bin/$t"
+          done
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
 
-      - name: "Prebuild lucihttp (debug-friendly)"
+      - name: Prebuild lucihttp (debug-friendly)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -116,18 +122,22 @@ jobs:
             exit $RET
           fi
 
-      - name: "Sanity check zh-cn PO domain"
+      - name: Sanity check zh-cn PO domain
         run: |
           set -e
           cd "$SDK_DIR/package/luci-app-nodemanager"
-          test -s po/zh-cn/nodemanager.po || { echo "::error::missing po/zh-cn/nodemanager.po"; exit 1; }
+          test -s po/zh-cn/nodemanager.po || { echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"; exit 1; }
 
-      - name: "Build app + zh-cn i18n (force, debug on failure)"
+      - name: Build app + zh-cn i18n (force, debug on failure)
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
+
+          echo "Using po2lmo: $(command -v po2lmo || true)"
+          po2lmo -h || true
+
           set +e
           make -j1 V=s package/luci-app-nodemanager/compile
           RET=$?
@@ -136,8 +146,16 @@ jobs:
             find build_dir -type f -name '*luci-app-nodemanager*log*' -exec tail -n 200 {} \; || true
             exit $RET
           fi
+
           make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
           make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
+          RET=$?
+          set -e
+          if [ $RET -ne 0 ]; then
+            echo '==== DUMP i18n logs ===='
+            find build_dir -type f -name '*luci-i18n-nodemanager-zh-cn*log*' -exec tail -n 200 {} \; || true
+            exit $RET
+          fi
 
       - name: Collect artifacts
         run: |
