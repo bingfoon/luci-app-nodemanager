@@ -1,136 +1,108 @@
-name: build-luci-app-nodemanager
+name: Build luci-app-nodemanager (OpenWrt SDK 24.10.2 x86_64)
+
 on:
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**/*'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          #- name: mediatek-filogic
-          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          - name: x86-64
-            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-
+    env:
+      SDK_VERSION: "24.10.2"
+      TARGET: "x86"
+      SUBTARGET: "64"
+      TOOLCHAIN: "gcc-13.3.0"
+      LIBC: "musl"
+      PACKAGE_NAME: "luci-app-nodemanager"
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install minimal deps
+      - name: Compute SDK names
+        id: names
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl
+          set -euo pipefail
+          SDK_BASE="openwrt-sdk-${SDK_VERSION}-${TARGET}-${SUBTARGET}_${TOOLCHAIN}_${LIBC}.Linux-x86_64"
+          echo "SDK_BASE=${SDK_BASE}" >> "$GITHUB_OUTPUT"
+          echo "SDK_DIR=${SDK_BASE}"   >> "$GITHUB_OUTPUT"
 
-      - name: Download & extract SDK
+      - name: Download OpenWrt SDK
         run: |
-          set -e
-          curl -L --fail -o sdk.tar.zst "${{ matrix.target.sdk }}"
+          set -euo pipefail
+          URL="https://downloads.openwrt.org/releases/${SDK_VERSION}/targets/${TARGET}/${SUBTARGET}/${{ steps.names.outputs.SDK_BASE }}.tar.zst"
+          echo "Downloading: $URL"
+          curl -fL --retry 5 --connect-timeout 20 -o sdk.tar.zst "$URL"
           tar -I zstd -xf sdk.tar.zst
-          SDK_DIR="$(tar -I zstd -tf sdk.tar.zst | head -1 | cut -d/ -f1)"
-          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
-          ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (openwrt-24.10)
+      - name: Prepare package inside SDK
         run: |
-          set -e
-          cd "$SDK_DIR"
-          BRANCH="openwrt-24.10"
-          if [ ! -x scripts/feeds ]; then
-            mkdir -p scripts
-            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
-            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
-            chmod +x scripts/feeds
-          fi
-          echo "src-git luci https://github.com/openwrt/luci.git;openwrt-24.10" > feeds.conf
-          ./scripts/feeds update luci
-          ./scripts/feeds install -p luci luci-base luci-compat
+          set -euo pipefail
+          SDK_DIR="${{ steps.names.outputs.SDK_DIR }}"
+          mkdir -p "${SDK_DIR}/package/${PACKAGE_NAME}"
+          rsync -a --delete --exclude '.git' --exclude '.github' ./ "${SDK_DIR}/package/${PACKAGE_NAME}/"
+          # 确保 Makefile 在 package 根：${SDK_DIR}/package/luci-app-nodemanager/Makefile
+          test -f "${SDK_DIR}/package/${PACKAGE_NAME}/Makefile"
 
-      - name: Remove lucihttp family to avoid lua/meson/ninja deps
+      - name: Setup feeds
+        working-directory: ${{ steps.names.outputs.SDK_DIR }}
         run: |
-          set -e
-          cd "$SDK_DIR"
-          rm -rf feeds/luci/contrib/package/lucihttp || true
+          set -euo pipefail
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-      - name: Init defconfig (no world build)
+      - name: Ensure host tools (po2lmo/jsmin)
+        working-directory: ${{ steps.names.outputs.SDK_DIR }}
         run: |
-          set -e
-          cd "$SDK_DIR"
-          : > .config
+          set -euo pipefail
+          make package/feeds/luci/luci-base/host-compile V=s
+
+      - name: Configure SDK (.config)
+        working-directory: ${{ steps.names.outputs.SDK_DIR }}
+        run: |
+          set -euo pipefail
+          # 最小化开启：把我们的包设为可编译 (=m)；打开中文/英文语言包；如用到旧 Lua API，也带上 luci-compat
+          {
+            echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
+            echo "CONFIG_LUCI_LANG_en=y"
+            echo "CONFIG_LUCI_LANG_zh_Hans=y"
+            echo "CONFIG_PACKAGE_luci-compat=m"
+          } >> .config
           make defconfig
+          echo "==== diffconfig ===="
+          ./scripts/diffconfig.sh || true
 
-      - name: Copy our package into SDK/package
+      - name: Build our package only
+        working-directory: ${{ steps.names.outputs.SDK_DIR }}
+        env:
+          # 让 po2lmo/jsmin 等在 PATH 里
+          PATH: ${{ steps.names.outputs.SDK_DIR }}/staging_dir/hostpkg/bin:${{ steps.names.outputs.SDK_DIR }}/staging_dir/host/bin:${{ env.PATH }}
+          PO2LMO: ${{ steps.names.outputs.SDK_DIR }}/staging_dir/hostpkg/bin/po2lmo
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE"
-          PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
-          rm -rf "$PKGROOT"; mkdir -p "$PKGROOT"
-          rsync -a --delete \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude 'sdk' \
-            --exclude "$SDK_DIR" \
-            --exclude 'out' \
-            ./ "$PKGROOT/"
-          # 若存在二级嵌套 luci-app-nodemanager/luci-app-nodemanager，自动扁平化
-          if [ ! -f "$PKGROOT/Makefile" ] && [ -f "$PKGROOT/luci-app-nodemanager/Makefile" ]; then
-            rsync -a "$PKGROOT/luci-app-nodemanager/" "$PKGROOT/"
-            rm -rf "$PKGROOT/luci-app-nodemanager"
-          fi
-          test -f "$PKGROOT/Makefile" || { echo "::error::Makefile not found in package/luci-app-nodemanager"; find "$PKGROOT" -maxdepth 3 -name Makefile; exit 1; }
-          echo "== package tree =="
-          find "$PKGROOT" -maxdepth 2 -type f -print
+          set -euo pipefail
+          echo "Using PO2LMO: ${PO2LMO}"
+          make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
 
-      - name: Build po2lmo (host tool; required for zh-cn)
+      - name: List built IPKs
+        working-directory: ${{ steps.names.outputs.SDK_DIR }}
         run: |
-          set -e
-          cd "$SDK_DIR"
-          test -d feeds/luci/modules/luci-base/src || { echo "::error::luci-base src not found"; exit 1; }
-          make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
-          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
-          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
-
-      - name: Enable our package in .config
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          echo 'CONFIG_PACKAGE_luci-app-nodemanager=y' >> .config
-          make defconfig
-          grep -n 'CONFIG_PACKAGE_luci-app-nodemanager' .config
-
-      - name: Compile ONLY our package (and i18n)
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
-          make -j"$(nproc)" V=s package/luci-app-nodemanager/compile
+          set -euo pipefail
           echo "::group::IPKs under bin/"
-          find bin -type f -name 'luci-app-nodemanager_*.ipk' -o -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -print
+          # 24.10 的 i18n 包名通常是 zh-cn，这里两种写法都找
+          find bin -type f \( -name "${PACKAGE_NAME}_*.ipk" -o -name "luci-i18n-nodemanager-zh-cn_*.ipk" -o -name "luci-i18n-nodemanager-zh-hans_*.ipk" \) -print || true
           echo "::endgroup::"
-
-      - name: Collect artifacts
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
-          mkdir -p "$OUT"
-          found=0
-          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f -name 'luci-app-nodemanager_*.ipk' -print0)
-          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -print0)
-          if [ "$found" -eq 0 ]; then
-            echo "::error::No luci-app-nodemanager ipk found under bin/"
-            find bin -maxdepth 5 -type f -name '*.ipk' -print
+          # 若未找到则报错以终止
+          if ! find bin -type f \( -name "${PACKAGE_NAME}_*.ipk" -o -name "luci-i18n-nodemanager-zh-cn_*.ipk" -o -name "luci-i18n-nodemanager-zh-hans_*.ipk" \) | grep -q .; then
+            echo "ERROR: No IPK produced. Check compile log above."
             exit 1
           fi
-          ls -l "$OUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-nodemanager-${{ matrix.target.name }}
-          path: out/${{ matrix.target.name }}
+          name: ipks-${{ steps.names.outputs.SDK_DIR }}
+          path: |
+            ${{ steps.names.outputs.SDK_DIR }}/bin/**/*.ipk
           if-no-files-found: error
