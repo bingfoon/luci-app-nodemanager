@@ -47,21 +47,31 @@ jobs:
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
-      - name: "Build po2lmo (via luci src Makefile)"
+      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
         run: |
           set -e
           cd "$SDK_DIR"
           # 直接用 luci-base 的 src 目录 Makefile 生成 po2lmo
           test -d feeds/luci/modules/luci-base/src || {
-            echo "::error::luci-base src not found (feeds not set to openwrt-24.10?)"
+            echo "::error::luci-base src not found (check feeds branch openwrt-24.10)"
             exit 1
           }
           make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
-          mkdir -p staging_dir/host/bin
-          install -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
-          echo "== staging_dir/host/bin =="
-          ls -l staging_dir/host/bin
+
+          # 同时安装到 host/bin 与 hostpkg/bin（24.10 下很多工具用 hostpkg）
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
+
+          echo "== host bins =="
+          ls -l staging_dir/host/bin || true
+          echo "== hostpkg bins =="
+          ls -l staging_dir/hostpkg/bin || true
+
           test -x staging_dir/host/bin/po2lmo
+          test -x staging_dir/hostpkg/bin/po2lmo
+
+          # 让后续 make 能直接找到
+          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Put our package into SDK (safe copy)
         run: |
