@@ -45,7 +45,6 @@ jobs:
           fi
           echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
           ./scripts/feeds update luci
-          # luci-base/luci-compat 提供 LuCI 运行时；po2lmo 将作为 luci-base 的 host 工具构建
           ./scripts/feeds install -p luci luci-base luci-compat
 
       - name: Put our package into SDK (safe copy)
@@ -73,12 +72,14 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build luci-base host tools (po2lmo)
+      - name: Build luci-base host tools (installs po2lmo)
         run: |
           set -e
           cd "$SDK_DIR"
-          # 在 24.10 分支，po2lmo 由 luci-base 的 HostBuild 提供
-          make package/feeds/luci/luci-base/host/compile -j$(nproc) V=sc
+          # 关键：必须 host/install 才会把 po2lmo 安到 staging_dir/host/bin/
+          make package/feeds/luci/luci-base/host/install -j$(nproc) V=sc
+          echo "== staging_dir/host/bin contents =="
+          ls -l staging_dir/host/bin || true
           test -x staging_dir/host/bin/po2lmo || { echo "::error::po2lmo host tool missing"; exit 1; }
 
       - name: Sanity check zh-cn PO domain
@@ -95,8 +96,8 @@ jobs:
           set -e
           cd "$SDK_DIR"
           make package/luci-app-nodemanager/compile -j$(nproc) V=sc
-          # i18n 子包名固定：luci-i18n-<app>-<lang>
-          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || true
+          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
+          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
 
       - name: Collect artifacts
         run: |
