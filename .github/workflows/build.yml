@@ -68,6 +68,22 @@ jobs:
               ;;
           esac
 
+      - name: Bootstrap feeds if missing
+        shell: bash
+        run: |
+          cd "$SDK_DIR"
+          # 有些 SDK 不带 scripts/feeds，缺就在线抓一份
+          if [ ! -x scripts/feeds ]; then
+            BRANCH="openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)"   # 24.10.2 -> openwrt-24.10
+            mkdir -p scripts
+            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
+            chmod +x scripts/feeds
+            # 最小 feeds，仅 luci（够生成 luci.mk 和 po2lmo/host）
+            cat > feeds.conf <<EOF
+            src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          EOF
+          fi
+
       - name: Prepare feeds (must have luci.mk)
         shell: bash
         run: |
