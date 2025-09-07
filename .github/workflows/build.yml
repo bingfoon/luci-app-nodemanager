@@ -53,29 +53,31 @@ jobs:
         shell: bash
         run: |
           tar --zstd -xf openwrt-sdk-*.tar.zst
-          echo "SDK_DIR=$(echo openwrt-sdk-*)" >> $GITHUB_ENV
+          SDK_DIR="$(tar --zstd -tf openwrt-sdk-*.tar.zst | head -1 | cut -d/ -f1)"
+          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
 
       - name: Bootstrap feeds if missing
         shell: bash
         run: |
           cd "$SDK_DIR"
           if [ ! -x scripts/feeds ]; then
-            BRANCH="openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)"   # 24.10.2 -> openwrt-24.10
+            BRANCH="openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)"  # 24.10.2 -> openwrt-24.10
             mkdir -p scripts
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
+            # 注意：EOF 行前不能有缩进！
             cat > feeds.conf <<EOF
-          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
-          EOF
+src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+EOF
           fi
 
-      - name: Prepare feeds (must have luci.mk)
+      - name: Prepare feeds
         shell: bash
         run: |
           cd "$SDK_DIR"
           ./scripts/feeds update -a
-          ./scripts/feeds install luci luci-compat  # 或用：./scripts/feeds install -a
+          ./scripts/feeds install luci luci-compat
 
       - name: Add package source
         shell: bash
@@ -98,7 +100,7 @@ jobs:
         shell: bash
         run: |
           cd "$SDK_DIR"
-          make package/luci-app-nodemanager/{clean,compile} V=s -j$(nproc)
+          make package/luci-app-nodemanager/{clean,compile} V=s -j"$(nproc)"
           find bin/ -name 'luci-app-nodemanager*_all.ipk' -o -name 'luci-i18n-nodemanager-*_all.ipk' -print
 
       - name: Upload ipk
