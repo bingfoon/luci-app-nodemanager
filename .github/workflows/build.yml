@@ -9,8 +9,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - name: mediatek-filogic
-            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          #- name: mediatek-filogic
+          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           - name: x86-64
             sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
@@ -43,10 +43,7 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          cat > feeds.conf <<'EOF'
-          src-git luci https://github.com/openwrt/luci.git;openwrt-24.10
-          # 仅保留 luci 源，避免引入无关包导致编译失败
-          EOF
+          echo "src-git luci https://github.com/openwrt/luci.git;openwrt-24.10" > feeds.conf
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
