@@ -1,11 +1,9 @@
 name: build-luci-app-nodemanager
-on:
-  workflow_dispatch:
+'on': { workflow_dispatch: {} }
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     strategy:
       fail-fast: false
       matrix:
@@ -16,13 +14,14 @@ jobs:
             sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install minimal deps
+      - name: Install host deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl gcc
+          sudo apt-get install -y \
+            build-essential gawk unzip zstd rsync file curl gcc \
+            cmake ninja-build pkg-config python3
 
       - name: Download & extract SDK
         run: |
@@ -33,7 +32,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup luci feed (openwrt-24.10)
+      - name: Setup feeds (luci + packages, openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -44,46 +43,38 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
-          ./scripts/feeds update luci
-          ./scripts/feeds install -p luci luci-base luci-compat
+          cat > feeds.conf <<EOF
+          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
+          EOF
+          ./scripts/feeds update luci packages
+          ./scripts/feeds install -p luci luci-base luci-compat || true
+          # 先把 lua 相关的 package 领到本地（不同分支名字不同，逐个尝试即可）
+          ./scripts/feeds install -p packages lua     || true
+          ./scripts/feeds/ install -p packages lua5.3 || true
+          ./scripts/feeds install -p packages lua5.4  || true
 
-      - name: Seed .config (ONLY our app & zh-cn; hard-disable lucihttp*)
+      - name: Seed .config & defconfig
         run: |
           set -e
           cd "$SDK_DIR"
-          # 只启用我们的包与中文语言包
           cat > .config <<'EOF'
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
-          # 明确关闭 lucihttp 及其 Lua 绑定，避免触发 lua.h
-          #（写在 .config，后面再 defconfig，不会被重新打开）
-          # CONFIG_PACKAGE_liblucihttp is not set
-          # CONFIG_PACKAGE_lucihttp is not set
-          # CONFIG_PACKAGE_lucihttp-lua is not set
           EOF
           make defconfig
-          # 保险起见，再写一次关闭项并不跑 defconfig，确保最终生效
-          {
-            echo '# CONFIG_PACKAGE_liblucihttp is not set'
-            echo '# CONFIG_PACKAGE_lucihttp is not set'
-            echo '# CONFIG_PACKAGE_lucihttp-lua is not set'
-          } >> .config
 
       - name: Put our package into SDK
         run: |
           set -e
           cd "$GITHUB_WORKSPACE"
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
-          rm -rf "$PKGROOT"
-          mkdir -p "$PKGROOT"
-          # 用 tar 管道避免把 SDK 自己打回去
+          rm -rf "$PKGROOT" && mkdir -p "$PKGROOT"
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
             --exclude='./sdk' \
-            . \
-          | tar -C "$PKGROOT" -xf -
+            . | tar -C "$PKGROOT" -xf -
 
       - name: Build po2lmo (LuCI official src)
         run: |
@@ -96,15 +87,54 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      - name: Build app + zh-cn i18n (no lucihttp, no lua)
+      - name: Build target Lua (auto-detect paths; put lua.h into staging)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 候选路径（核心树与 feeds 的多种常见位置）
+          CANDIDATES="
+          package/lang/lua
+          package/libs/lua
+          package/utils/lua
+          feeds/packages/lang/lua
+          feeds/packages/lang/lua5.3
+          feeds/packages/lang/lua5.4
+          feeds/packages/libs/lua
+          feeds/packages/utils/lua
+          "
+          built=""
+          for P in $CANDIDATES; do
+            [ -f "$P/Makefile" ] || continue
+            if [[ "$P" == feeds/* ]]; then
+              TGT="package/feeds/${P#feeds/}/compile"
+            else
+              TGT="$P/compile"
+            fi
+            echo "::group::Build $P -> make $TGT"
+            make -j"$(nproc)" V=sc "$TGT" && built="yes"
+            echo "::endgroup::"
+            [ -n "$built" ] && break
+          done
+          if [ -z "$built" ]; then
+            echo "::error::Lua package not found in core or feeds; cannot provide lua.h for lucihttp"
+            echo "Tree hint:"
+            ls -al package/lang/ 2>/dev/null || true
+            ls -al package/libs/ 2>/dev/null || true
+            ls -al package/utils/ 2>/dev/null || true
+            ls -al feeds/packages/lang/ 2>/dev/null || true
+            ls -al feeds/packages/libs/ 2>/dev/null || true
+            ls -al feeds/packages/utils/ 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Build app + zh-cn i18n
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
-          # 仅编译我们的包（不会拉起 lucihttp*/lua*）
+          # 有些 SDK 会顺带触发 lucihttp，此时因为 lua.h 已在，能通过
           make -j1 V=s package/luci-app-nodemanager/compile
-          # 中文语言包（两种路径都试一下）
           make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
           make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
 
@@ -117,8 +147,7 @@ jobs:
           find bin/packages -type f -name 'luci-app-nodemanager_*.ipk' -exec cp -v '{}' "$OUT/" \;
           find bin/packages -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -exec cp -v '{}' "$OUT/" \;
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: luci-app-nodemanager-${{ matrix.target.name }}
           path: out/${{ matrix.target.name }}/*.ipk
