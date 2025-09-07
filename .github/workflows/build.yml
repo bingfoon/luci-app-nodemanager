@@ -32,8 +32,8 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      # 只拉 luci + 一个“core”别名指向 openwrt 主仓（用来取 libnl-tiny）
-      - name: Setup feeds (luci + core(openwrt), branch openwrt-24.10)
+      # luci + core（只为拿 libnl-tiny）—— 都是 openwrt-24.10 分支
+      - name: Setup feeds
         run: |
           set -e
           cd "$SDK_DIR"
@@ -50,7 +50,6 @@ jobs:
           EOF
           ./scripts/feeds update luci core
           ./scripts/feeds install -p luci luci-base luci-compat
-          # 从 core feed 安装 libnl-tiny（确保存在）
           ./scripts/feeds install -p core libnl-tiny
 
       - name: Hard-disable lucihttp (double insurance)
@@ -69,7 +68,7 @@ jobs:
           CONFIG_ALL_NONSHARED=n
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
-          # 强制关闭 lucihttp 家族
+          # 彻底关闭 lucihttp 家族
           # CONFIG_PACKAGE_liblucihttp is not set
           # CONFIG_PACKAGE_lucihttp is not set
           # CONFIG_PACKAGE_lucihttp-lua is not set
@@ -81,15 +80,12 @@ jobs:
           set -e
           cd "$GITHUB_WORKSPACE"
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
-          rm -rf "$PKGROOT"
-          mkdir -p "$PKGROOT"
-          # 用 tar 管道避免把 SDK 自己打回去
+          rm -rf "$PKGROOT"; mkdir -p "$PKGROOT"
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
             --exclude='./sdk' \
-            . \
-          | tar -C "$PKGROOT" -xf -
+            . | tar -C "$PKGROOT" -xf -
 
       - name: Build po2lmo (LuCI official src)
         run: |
@@ -102,29 +98,25 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # 关键：先把 libnl-tiny 编出来，给 rpcd-mod-luci 提供 netlink 头文件
+      # 给 rpcd-mod-luci 提供 netlink 头文件
       - name: Build libnl-tiny (from core feed)
         run: |
           set -e
           cd "$SDK_DIR"
-          # 安装过了就编译；路径是 package/feeds/core/libnl-tiny
           make -j"$(nproc)" V=s package/feeds/core/libnl-tiny/compile
-          # 校验头文件是否已进入 staging
           if ! ls staging_dir/target-*/usr/include/libnl-tiny/netlink/msg.h >/dev/null 2>&1; then
             echo "::error::libnl-tiny headers missing after build (netlink/msg.h)"
-            find staging_dir -path '*/usr/include/libnl-tiny' -maxdepth 3 -type f | sed 's/^/::debug::/g' || true
             exit 1
           fi
 
-      - name: Build app + zh-cn i18n
+      # 只编主包；语言包会由 luci.mk 自动生成为子包
+      - name: Build luci-app-nodemanager (i18n generated automatically)
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
           make -j1 V=s package/luci-app-nodemanager/compile
-          make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
-          make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect artifacts
         run: |
@@ -132,8 +124,12 @@ jobs:
           cd "$SDK_DIR"
           OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
           mkdir -p "$OUT"
+          # 主包
           find bin/packages -type f -name 'luci-app-nodemanager_*.ipk' -exec cp -v '{}' "$OUT/" \;
+          # 中文语言包（由主包目录下 po/zh-cn 自动生成）
           find bin/packages -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -exec cp -v '{}' "$OUT/" \;
+          echo "== list out =="
+          ls -l "$OUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
