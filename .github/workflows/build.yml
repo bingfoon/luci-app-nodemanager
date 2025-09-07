@@ -21,12 +21,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build deps (incl. meson/ninja/pkg-config/python3)
+      - name: Install build deps (incl. meson/ninja/pkg-config/python3/cmake)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential gawk unzip libncurses5-dev zstd rsync file curl gcc \
-            ninja-build meson pkg-config python3
+            ninja-build meson pkg-config python3 cmake
 
       - name: Download & extract SDK
         run: |
@@ -100,7 +100,7 @@ jobs:
           cd "$SDK_DIR"
           mkdir -p staging_dir/hostpkg/bin staging_dir/host/bin
           SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-          for t in meson ninja pkg-config python3; do
+          for t in meson ninja pkg-config python3 cmake; do
             SYS_BIN="$(PATH="$SYS_PATH" /usr/bin/which "$t" 2>/dev/null || true)"
             [ -n "$SYS_BIN" ] && [ -x "$SYS_BIN" ] || { echo "::error::system tool $t not found in $SYS_PATH"; exit 1; }
             for dst in "staging_dir/hostpkg/bin/$t" "staging_dir/host/bin/$t"; do
@@ -119,21 +119,26 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # 关键修复：先把目标端 liblua 放进 staging（提供 lua.h / lua5.1.pc）
-      - name: "Build target liblua (headers for lucihttp; try core, then feeds)"
+      # 关键修复：为 lucihttp 准备 lua.h & lua.pc
+      - name: "Build target Lua (headers for lucihttp; probe paths)"
         run: |
           set -e
           cd "$SDK_DIR"
-          # 尝试核心树 liblua
-          if make -j"$(nproc)" V=sc package/libs/lua/compile; then
-            echo "::notice::built core package/libs/lua"
+          if [ -f package/lang/lua/Makefile ]; then
+            echo "::notice::building core package/lang/lua"
+            make -j"$(nproc)" V=sc package/lang/lua/compile
+          elif [ -f package/libs/lua/Makefile ]; then
+            echo "::notice::building core package/libs/lua"
+            make -j"$(nproc)" V=sc package/libs/lua/compile
           else
-            echo "::warning::core package/libs/lua not found, fallback to feeds/packages"
-            # 保证 packages feed 已存在（前面已配置），安装 lua 描述
-            ./scripts/feeds install -p packages lua || ./scripts/feeds install -p packages lua5.1 || true
-            # 逐个尝试 feeds 下的 lua 名称
-            make -j"$(nproc)" V=sc package/feeds/packages/lua/compile || \
-            make -j"$(nproc)" V=sc package/feeds/packages/lua5.1/compile
+            echo "::warning::core lua not found, fallback to feeds/packages"
+            ./scripts/feeds install -p packages lua || true
+            if [ -f feeds/packages/lang/lua/Makefile ]; then
+              make -j"$(nproc)" V=sc package/feeds/packages/lua/compile
+            else
+              echo "::error::lua package not found in core or feeds (needed for lua.h)"
+              exit 1
+            fi
           fi
 
       - name: "Prebuild lucihttp (debug-friendly)"
