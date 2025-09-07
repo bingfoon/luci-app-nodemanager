@@ -53,13 +53,13 @@ jobs:
 
       - name: Put our package into SDK
         run: |
-          cd "$SDK_DIR"
-          rm -rf package/luci-app-nodemanager
-          mkdir -p package
-          # 将本仓库完整拷贝为 luci-app-nodemanager 包
-          cp -a "$GITHUB_WORKSPACE" package/luci-app-nodemanager
-          # 避免把 .git 带进去
-          rm -rf package/luci-app-nodemanager/.git
+          cd "$GITHUB_WORKSPACE"
+          PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
+          rm -rf "$PKGROOT"
+          mkdir -p "$PKGROOT"
+
+          git archive --format=tar HEAD | tar -C "$PKGROOT" -xf -
+
 
       - name: Seed .config & defconfig
         run: |
