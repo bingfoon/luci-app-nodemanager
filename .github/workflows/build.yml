@@ -67,29 +67,37 @@ jobs:
               exit 1
               ;;
           esac
-          
-      - name: Append packages to .config
+
+      - name: Prepare feeds (must have luci.mk)
         shell: bash
         run: |
+          cd "$SDK_DIR"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a    # 或至少：./scripts/feeds install luci luci-compat
+
+      - name: Add package source
+        shell: bash
+        run: |
+          cd "$SDK_DIR"
+          rm -rf package/luci-app-nodemanager
+          cp -a "$GITHUB_WORKSPACE/luci-app-nodemanager" package/
+
+      - name: Select packages
+        shell: bash
+        run: |
+          cd "$SDK_DIR"
           cat >> .config <<'EOF'
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
-          # 如需更多语言，继续追加：
-          # CONFIG_PACKAGE_luci-i18n-nodemanager-zh-tw=y
-          # CONFIG_PACKAGE_luci-i18n-nodemanager-ja=y
           EOF
           make defconfig
-          
-      - name: Feed & Link package
+
+      - name: Build luci-app-nodemanager
+        shell: bash
         run: |
-          pushd sdk
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          mkdir -p package/luci-app-nodemanager
-          rsync -a ../ ./package/luci-app-nodemanager/ --exclude sdk --exclude .git --exclude .github
-          make defconfig
-          make package/luci-app-nodemanager/{clean,compile} -j$(nproc) V=s
-          popd
+          cd "$SDK_DIR"
+          make package/luci-app-nodemanager/{clean,compile} V=s
+          find bin/ -name 'luci-app-nodemanager*_all.ipk' -o -name 'luci-i18n-nodemanager-*_all.ipk' -print
 
       - name: Upload ipk
         uses: actions/upload-artifact@v4
