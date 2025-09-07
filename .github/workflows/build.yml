@@ -11,8 +11,8 @@ jobs:
         target:
           - name: mediatek-filogic
             sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          - name: x86-64
-            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          #- name: x86-64
+          #  sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -25,69 +25,96 @@ jobs:
 
       - name: Download & extract SDK
         run: |
+          set -e
           curl -L --fail -o sdk.tar.zst "${{ matrix.target.sdk }}"
           # 解压
           tar -I zstd -xf sdk.tar.zst
           # 取目录名并导出
           SDK_DIR="$(tar -I zstd -tf sdk.tar.zst | head -1 | cut -d/ -f1)"
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
-          # 方便后续使用
+          # 方便 some excludes
           ln -s "$SDK_DIR" sdk
 
       - name: Setup feeds (luci only, openwrt-24.10)
         run: |
+          set -e
           cd "$SDK_DIR"
           BRANCH="openwrt-24.10"
-          # 如果 SDK 里没有 scripts/feeds，则在线补齐
+          # 如 SDK 缺 feeds 脚本则在线补齐
           if [ ! -x scripts/feeds ]; then
             mkdir -p scripts
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          # 只用 luci 源即可
+          # 只用 luci 源
           echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
           ./scripts/feeds update luci
-          # 安装构建 LuCI 所需的包和工具（含 po2lmo/host）
-          ./scripts/feeds install -p luci po2lmo luci-base luci-compat
+          # 安装 luci-base / luci-compat / po2lmo (host)
+          ./scripts/feeds install -p luci luci-base luci-compat po2lmo
 
-      - name: Put our package into SDK
+      - name: Put our package into SDK (safe copy)
         run: |
+          set -e
           cd "$GITHUB_WORKSPACE"
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-
-          git archive --format=tar HEAD | tar -C "$PKGROOT" -xf -
-
+          # 用 tar 管道拷贝，避免把仓库拷进自己
+          tar -cf - \
+            --exclude='./.git' \
+            --exclude="./$SDK_DIR" \
+            --exclude='./sdk' \
+            . \
+          | tar -C "$PKGROOT" -xf -
 
       - name: Seed .config & defconfig
         run: |
+          set -e
           cd "$SDK_DIR"
           cat >> .config <<'EOF'
           CONFIG_TARGET_IMAGES_GZIP=y
-          # 选择我们的主包 + 中文语言包
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
           EOF
           make defconfig
 
-      - name: Build (app + zh-cn i18n)
+      - name: Build po2lmo (host tool)
         run: |
+          set -e
           cd "$SDK_DIR"
-          # 先保证 po2lmo 主机工具可用（多余但稳）
+          # 优先 feeds 路径，失败再兜底
+          make package/feeds/luci/po2lmo/host/compile -j$(nproc) V=sc || \
           make package/po2lmo/host/compile -j$(nproc) V=sc
-          # 编译主包和中文语言包（显式编译语言子包，确保一定产物）
+          test -x staging_dir/host/bin/po2lmo || { echo "::error::po2lmo host tool missing"; exit 1; }
+
+      - name: Sanity check zh-cn PO domain
+        run: |
+          set -e
+          cd "$SDK_DIR/package/luci-app-nodemanager"
+          if [ ! -s po/zh-cn/nodemanager.po ]; then
+            echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"
+            exit 1
+          fi
+
+      - name: Build app + zh-cn i18n
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 编译主包（luci.mk 会自动生成 i18n 子包定义）
           make package/luci-app-nodemanager/compile -j$(nproc) V=sc
-          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
+          # 显式构建中文语言包（两种路径都尝试）
+          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
+          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
 
       - name: Collect artifacts
         run: |
+          set -e
           cd "$SDK_DIR"
-          mkdir -p "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
-          # 收集主包 + 中文 i18n 子包
-          find bin/packages -type f -name 'luci-app-nodemanager_*.ipk' -exec cp -v '{}' "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}/" \;
-          find bin/packages -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -exec cp -v '{}' "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}/" \;
+          OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
+          mkdir -p "$OUT"
+          find bin/packages -type f -name 'luci-app-nodemanager_*.ipk' -exec cp -v '{}' "$OUT/" \;
+          find bin/packages -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -exec cp -v '{}' "$OUT/" \;
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
