@@ -1,5 +1,5 @@
 name: build-luci-app-nodemanager
-'on':
+on:
   workflow_dispatch:
 
 jobs:
@@ -21,7 +21,9 @@ jobs:
       - name: Install minimal deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl gcc
+          # 含 cmake/ninja/pkg-config，避免 lucihttp 构建器缺工具
+          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl gcc \
+                                  cmake ninja-build pkg-config
 
       - name: Download & extract SDK
         run: |
@@ -32,7 +34,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup luci feed (openwrt-24.10)
+      - name: Setup feeds (luci + packages, openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -43,9 +45,14 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
-          ./scripts/feeds update luci
-          ./scripts/feeds install -p luci luci-base luci-compat
+          cat > feeds.conf <<EOF
+          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
+          EOF
+          # 这里只装 luci-base 必需项 + 我们需要的 lua
+          ./scripts/feeds update luci packages
+          ./scripts/feeds install -p luci luci-base
+          ./scripts/feeds install -p packages lua
 
       - name: Seed .config & defconfig
         run: |
@@ -54,6 +61,9 @@ jobs:
           cat >> .config <<'EOF'
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
+          # 可选：不强制把 lucihttp/lua 进最终 ipk，但确保能构建
+          # CONFIG_PACKAGE_liblucihttp=n
+          # CONFIG_PACKAGE_lucihttp-lua=n
           EOF
           make defconfig
 
@@ -64,7 +74,7 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-          # 用 tar 管道避免把 SDK 自己打进来
+          # 用 tar 管道避免把 SDK 自己打回去
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -83,19 +93,24 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
+      - name: Build target liblua (provide lua.h for lucihttp-lua)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # feeds 已安装了 packages/lua，这里直接编译目标端 liblua
+          make -j"$(nproc)" V=sc package/feeds/packages/lua/compile
+
       - name: Build app + zh-cn i18n
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
-
-          # 主包
-          make -j1 V=s package/luci-app-nodemanager/compile
-
-          # 语言包（两种路径都试一下，兼容不同 luci feed 结构）
-          make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
-          make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
+          # 主包（会自动拉起 luci 依赖与 lucihttp；此时 lua.h 已在）
+          make -j"$(nproc)" V=s package/luci-app-nodemanager/compile
+          # 中文语言包（不同 feed 结构都兼容）
+          make -j"$(nproc)" V=s package/luci-i18n-nodemanager-zh-cn/compile || \
+          make -j"$(nproc)" V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect artifacts
         run: |
