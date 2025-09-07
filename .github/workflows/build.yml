@@ -81,23 +81,14 @@ jobs:
         shell: bash
         run: |
           cd "$SDK_DIR"
-          mkdir -p package
           rm -rf package/luci-app-nodemanager
-
-          # 自动检测包源码路径
-          if [ -f "$GITHUB_WORKSPACE/Makefile" ] && grep -q 'PKG_NAME:=luci-app-nodemanager' "$GITHUB_WORKSPACE/Makefile"; then
-            SRC="$GITHUB_WORKSPACE"
-          elif [ -d "$GITHUB_WORKSPACE/luci-app-nodemanager" ]; then
-            SRC="$GITHUB_WORKSPACE/luci-app-nodemanager"
-          else
-            echo "ERROR: cannot locate luci-app-nodemanager source in repo" >&2
-            ls -la "$GITHUB_WORKSPACE"
-            exit 1
-          fi
-
-          cp -a "$SRC" package/luci-app-nodemanager
-          # 可选：避免把 .git 带进 SDK
-          rm -rf package/luci-app-nodemanager/.git
+          mkdir -p package/luci-app-nodemanager
+          # 用 tar 流拷贝，排除 .git 和已解压的 SDK 目录
+          tar -C "$GITHUB_WORKSPACE" \
+              --exclude '.git' \
+              --exclude 'openwrt-sdk-*' \
+              -cf - . \
+          | tar -C package/luci-app-nodemanager -xf -
 
       - name: Select packages
         shell: bash
