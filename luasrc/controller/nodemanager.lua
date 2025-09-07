@@ -7,6 +7,7 @@ function index()
 	entry({"admin","services","nodemanager","proxies"},   call("action_proxies"),   _("Proxies"),   10).leaf = true
 	entry({"admin","services","nodemanager","providers"}, call("action_providers"), _("Providers"), 20).leaf = true
 	entry({"admin","services","nodemanager","dns"},       call("action_dns"),       _("DNS"),       30).leaf = true
+	entry({"admin","services","nodemanager","settings"},  call("action_settings"),  _("Settings"),  40).leaf = true
 end
 
 local function json(resp)
@@ -17,7 +18,6 @@ end
 
 local function get_token()
 	local dsp = require "luci.dispatcher"
-	-- Try multiple fields to be compatible with different LuCI versions
 	return (dsp.context and dsp.context.requesttoken)
 	    or (dsp.ctx and dsp.ctx.requesttoken)
 	    or (dsp._ctx and dsp._ctx.requesttoken)
@@ -40,7 +40,6 @@ function action_proxies()
 	local proxies = data.proxies or {}
 	local bindsrc = data.bindmap or {}
 
-	-- Normalize bindmap: always table of IP strings; never numbers/0.
 	local bindmap = {}
 	for _,p in ipairs(proxies) do
 		local v = bindsrc[p.name]
@@ -49,7 +48,7 @@ function action_proxies()
 		elseif type(v) == "string" then
 			bindmap[p.name] = { v }
 		else
-			bindmap[p.name] = {} -- ensure empty, not 0
+			bindmap[p.name] = {}
 		end
 	end
 
@@ -95,5 +94,36 @@ function action_dns()
 	luci.template.render("nodemanager/dns", {
 		servers = data.dns_servers or {},
 		token   = get_token()
+	})
+end
+
+function action_settings()
+	local http = require "luci.http"
+	local uci  = require("luci.model.uci").cursor()
+	local util = require "luci.nodemanager.util"
+
+	if http.getenv("REQUEST_METHOD") == "POST" then
+		local path = http.formvalue("path") or ""
+		local tpl  = http.formvalue("template") or ""
+		path = (path:gsub("%s+$",""))
+		tpl  = (tpl:gsub("%s+$",""))
+
+		if path == "" then return json({code=1, msg="Config path cannot be empty"}) end
+		uci:section("nodemanager", "config", "config", { path = path, template = tpl })
+		uci:commit("nodemanager")
+
+		if http.formvalue("create") == "1" then
+			local ok, p = util.ensure_file(path, tpl ~= "" and tpl or nil)
+			if not ok then return json({code=1, msg="Failed to create "..tostring(p)}) end
+		end
+		return json({code=0})
+	end
+
+	local path = uci:get("nodemanager","config","path") or ""
+	local tpl  = uci:get("nodemanager","config","template") or ""
+	luci.template.render("nodemanager/settings", {
+		path  = path,
+		tpl   = tpl,
+		token = get_token()
 	})
 end

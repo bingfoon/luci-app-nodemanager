@@ -4,7 +4,7 @@ local i18n = require "luci.i18n"
 
 local M = {}
 
--- Safety shim for table.insert (optional robustness)
+-- Safety shim
 do
   local _insert = table.insert
   function table.insert(t, a, b)
@@ -14,14 +14,23 @@ do
   end
 end
 
+-- ===== Defaults =====
 local DEFAULT_CFG = "/etc/nikki/profiles/config.yaml"
 local DEFAULT_TPL = "/usr/share/nodemanager/config.template.yaml"
 
+-- ===== Helpers =====
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
 local function is_ipv4(s) return s and s:match("^%d+%.%d+%.%d+%.%d+$") ~= nil end
 local function is_hostname(s) return s and s:match("^[%w%-%.]+$") ~= nil end
 local function is_port(p) p = tonumber(p); return p and p >= 1 and p <= 65535 end
 local function is_http_url(u) return u and u:match("^https?://[%w%-%._~:/%?#%[%]@!$&'()*+,;=%%]+$") end
+
+local function strip_trailing_blank(lines)
+  while #lines > 0 and (lines[#lines] == "" or lines[#lines]:match("^%s*$")) do
+    table.remove(lines)
+  end
+  return lines
+end
 
 local function conf_path()
   local uci = require("luci.model.uci").cursor()
@@ -35,6 +44,7 @@ local function tpl_path()
   return (t and #t>0) and t or DEFAULT_TPL
 end
 
+-- Full fallback template (non-empty)
 local function fallback_template()
   return [===[
 airport: &airport
@@ -223,20 +233,29 @@ rule-providers:
   telegram_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
   netflix_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
   apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
+
 ]===]
 end
 
-local function ensure_config_exists()
-  local path = conf_path()
-  if fs.access(path) then return path end
+-- Exported: ensure config file exists (optionally using overrides)
+function M.ensure_file(path_override, tpl_override)
+  local path = path_override or conf_path()
+  if fs.access(path) then return true, path end
   local dir = path:match("^(.+)/[^/]+$") or "/"
   sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
-  local t = tpl_path()
+  local t = tpl_override or tpl_path()
   local content = fs.readfile(t) or fallback_template()
   fs.writefile(path, content)
-  return path
+  return fs.access(path), path
 end
 
+-- Internal ensure (uses UCI)
+local function ensure_config_exists()
+  local ok, p = M.ensure_file()
+  return p
+end
+
+-- Read/write helpers
 local function read_lines(path)
   path = path or ensure_config_exists()
   local s = fs.readfile(path) or ""
@@ -245,15 +264,21 @@ local function read_lines(path)
     line = line:gsub("\r$","")
     table.insert(t, line)
   end
-  if #s == 0 then t = {} end
+  if #s == 0 then
+    t = {}
+  else
+    if #t > 0 and t[#t] == "" then table.remove(t) end
+  end
   return t
 end
 
 local function write_lines(lines, path)
   path = path or ensure_config_exists()
+  lines = strip_trailing_blank(lines)
   return fs.writefile(path, table.concat(lines, "\n").."\n")
 end
 
+-- Anchor helpers
 local function ensure_anchor_block(lines, header, start_hint, end_hint)
   local header_pat = "^%s*" .. header .. ":%s*$"
   local header_idx
@@ -304,6 +329,7 @@ local function find_range(lines, start_hint, end_hint)
   return nil, nil
 end
 
+-- Parsers
 local function parse_proxies(lines)
   local proxies = {}
   for _,l in ipairs(lines) do
@@ -327,15 +353,13 @@ local function parse_proxies(lines)
   return proxies
 end
 
--- STRICT bindmap parser: only keep valid IPv4 (a.b.c.d) and skip anything else (e.g., "0")
 local function parse_bindmap(lines)
   local map = {}
   for _,l in ipairs(lines) do
     local ip, name = l:match("^%s*%-%s*SRC%-IP%-CIDR,([^,/]+)/32,([^\r\n]+)$")
     if ip and name then
-      ip = trim(ip)
-      name = trim(name)
-      if is_ipv4(ip) then
+      ip = trim(ip); name = trim(name)
+      if ip and ip ~= "" and is_ipv4(ip) then
         map[name] = map[name] or {}
         table.insert(map[name], ip)
       end
@@ -417,7 +441,7 @@ function M.load_all()
   return { proxies = proxies, bindmap = bindmap, providers = providers, dns_servers = dns_servers }
 end
 
--- forms
+-- ===== Form parsing & validation =====
 function M.parse_proxy_form(form)
   local names     = form["name[]"]      or form.name
   local servers   = form["server[]"]    or form.server
@@ -526,6 +550,7 @@ function M.parse_dns_form(form)
   return true, list
 end
 
+-- ===== Save =====
 function M.save_proxies_and_rules(list)
   local lines = read_lines()
 
@@ -662,4 +687,5 @@ function M.save_dns_servers(servers)
 end
 
 function M.conf_path() return conf_path() end
+
 return M

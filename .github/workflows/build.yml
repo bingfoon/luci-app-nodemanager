@@ -17,16 +17,16 @@ jobs:
           - { arch: "mediatek", sub: "filogic" }
     runs-on: ubuntu-22.04
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Lint Lua sources
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y lua5.1
-        find luasrc -name '*.lua' -print0 | xargs -0 -n1 luac -p
+      - name: Lint Lua sources
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+          find luasrc -name '*.lua' -print0 | xargs -0 -n1 luac -p
 
-    - name: Prepare
+      - name: Prepare
         run: |
           VER="${{ github.event.inputs.owrt_version || '24.10.0' }}"
           echo "VER=$VER" >> $GITHUB_ENV
@@ -75,6 +75,10 @@ jobs:
           ./scripts/feeds install -a
           mkdir -p package/luci-app-nodemanager
           rsync -a ../ ./package/luci-app-nodemanager/ --exclude sdk --exclude .git --exclude .github
+          cat >> .config <<'EOF'
+CONFIG_PACKAGE_luci-app-nodemanager=y
+CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y   # <== 语言包子包
+EOF
           make defconfig
           make package/luci-app-nodemanager/{clean,compile} -j$(nproc) V=s
           popd
