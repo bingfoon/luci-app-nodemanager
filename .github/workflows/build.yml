@@ -53,7 +53,8 @@ jobs:
         shell: bash
         run: |
           tar --zstd -xf openwrt-sdk-*.tar.zst
-          SDK_DIR="$(tar --zstd -tf openwrt-sdk-*.tar.zst | head -1 | cut -d/ -f1)"
+          # 只匹配已解压出的目录，不会匹配 .tar.zst
+          SDK_DIR="$(ls -d openwrt-sdk-*/ | head -1 | sed 's:/$::')"
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
 
       - name: Bootstrap feeds if missing
