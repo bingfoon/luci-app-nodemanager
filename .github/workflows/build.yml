@@ -11,8 +11,8 @@ jobs:
         target:
           - name: mediatek-filogic
             sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          #- name: x86-64
-          #  sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - name: x86-64
+            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -47,14 +47,28 @@ jobs:
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
-      - name: Build po2lmo (manually from luci source)
+      - name: Build po2lmo (robust: find sources & gcc)
         run: |
           set -e
           cd "$SDK_DIR"
-          # 直接用 luci 源码的 po2lmo 工程编译
-          make -C feeds/luci/modules/luci-base/src/po2lmo
+          # 在 luci 源中查找 po2lmo 与 template_lmo 源文件
+          PO2C="$(grep -R -l --null -E '/po2lmo\.c$|^po2lmo\.c$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
+          TLC="$(grep -R -l --null -E '/template_lmo\.c$|^template_lmo\.c$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
+          TLH="$(grep -R -l --null -E '/template_lmo\.h$|^template_lmo\.h$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
+          echo "PO2C=$PO2C"
+          echo "TLC=$TLC"
+          echo "TLH=$TLH"
+          if [ -z "$PO2C" ] || [ -z "$TLC" ] || [ -z "$TLH" ]; then
+            echo "::error::po2lmo sources not found in feeds/luci"
+            exit 1
+          fi
+          TMPDIR="$(mktemp -d)"
+          cp "$PO2C" "$TMPDIR/po2lmo.c"
+          cp "$TLC"  "$TMPDIR/template_lmo.c"
+          cp "$TLH"  "$TMPDIR/template_lmo.h"
+          gcc -O2 "$TMPDIR/po2lmo.c" "$TMPDIR/template_lmo.c" -o "$TMPDIR/po2lmo"
           mkdir -p staging_dir/host/bin
-          cp -vf feeds/luci/modules/luci-base/src/po2lmo/po2lmo staging_dir/host/bin/po2lmo
+          install -m0755 "$TMPDIR/po2lmo" staging_dir/host/bin/po2lmo
           echo "== staging_dir/host/bin =="
           ls -l staging_dir/host/bin
           test -x staging_dir/host/bin/po2lmo
@@ -66,7 +80,7 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-          # 用 tar 管道拷贝，避免把仓库拷进自己
+          # 用 tar 管道拷贝，避免“把仓库拷到自己里面”的循环错误
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -94,12 +108,12 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build app + zh-cn i18n
+      - name: Build app + zh-cn i18n (force)
         run: |
           set -e
           cd "$SDK_DIR"
           make package/luci-app-nodemanager/compile -j$(nproc) V=sc
-          # 显式构建中文语言包（两条路径都尝试，兼容不同 feed 命名）
+          # 显式构建中文语言包；不同 SDK/feeds 结构兼容两条路径
           make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
           make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
 
