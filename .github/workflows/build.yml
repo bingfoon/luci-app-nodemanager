@@ -119,18 +119,16 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # 为 lucihttp 提供 lua.h：多路径探测 + 自动回退（核心树优先，其次 feeds）
+      # 为 lucihttp 提供 lua.h：自动探测 + 正确映射 make 目标
       - name: "Build target Lua (headers for lucihttp; robust probe)"
         run: |
           set -e
           cd "$SDK_DIR"
-
-          # 先把 packages feed 里的 lua 变体装上（存在即跳过）
-          ./scripts/feeds install -p packages lua  || true
+          # 先尝试在 feeds 安装几种 Lua 变体（存在就跳过）
+          ./scripts/feeds install -p packages lua    || true
           ./scripts/feeds install -p packages lua5.3 || true
           ./scripts/feeds install -p packages lua5.4 || true
 
-          # 依次探测以下可能路径（存在即使用）
           CANDIDATES="
           package/lang/lua
           package/libs/lua
@@ -143,9 +141,11 @@ jobs:
           for P in $CANDIDATES; do
             if [ -f "$P/Makefile" ]; then
               if [[ "$P" == feeds/* ]]; then
-                TGT="package/${P#feeds/}/compile"
+                # 正确的 feeds 目标需要 'package/feeds/...'
+                TGT="package/feeds/${P#feeds/}/compile"
               else
-                TGT="package/${P#package/}/compile"
+                # 核心树用原样路径即可
+                TGT="$P/compile"
               fi
               echo "::group::Build $P -> make $TGT"
               make -j"$(nproc)" V=sc "$TGT"
@@ -157,6 +157,8 @@ jobs:
 
           if [ -z "$built" ]; then
             echo "::error::Lua package not found in core or feeds (tried: $CANDIDATES)"
+            echo "== hint =="
+            echo "ls package/lang/ ; ls package/libs/ ; ls feeds/packages/lang/ || true"
             exit 1
           fi
 
