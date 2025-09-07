@@ -109,53 +109,23 @@ jobs:
             exit 1
           fi
 
-      # 只编主包；语言包会由 luci.mk 自动生成为子包
-      - name: Build luci-app-nodemanager (i18n generated automatically)
+      - name: Build & package luci-app-nodemanager (force ipk)
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
-          make -j1 V=s package/luci-app-nodemanager/compile
 
-      - name: Collect artifacts (robust)
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
-          mkdir -p "$OUT"
+          # 先清理，避免旧中间产物影响
+          make -j1 V=s package/luci-app-nodemanager/clean
 
-          echo "::group::bin layout (for debug)"
-          find bin -maxdepth 4 -type d -print
+          # 直接跑到 install 阶段（会触发打包生成 .ipk）
+          make -j1 V=s package/luci-app-nodemanager/install
+
+          echo "::group::Where ipk are"
+          # 通常出现在 bin/packages/*/*/ 里，也可能在 bin/targets/.../packages
+          find bin -type f -name 'luci-app-nodemanager_*.ipk' -o -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -print
           echo "::endgroup::"
-
-          found=0
-          # 主包
-          while IFS= read -r -d '' f; do
-            cp -v "$f" "$OUT/"
-            found=1
-          done < <(find bin -type f -name 'luci-app-nodemanager_*.ipk' -print0)
-
-          # 中文语言包
-          while IFS= read -r -d '' f; do
-            cp -v "$f" "$OUT/"
-            found=1
-          done < <(find bin -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -print0)
-
-          # 如果还是没找到，打印更多信息并失败
-          if [ "$found" -eq 0 ]; then
-            echo "::error::No luci-app-nodemanager *.ipk found under bin/"
-            echo "::group::bin tree"
-            find bin -maxdepth 5 -type f -name '*.ipk' -print | sed 's/^/ - /'
-            echo "::endgroup::"
-            echo "::group::build_dir (ipk?)"
-            find build_dir -type f -name '*.ipk' -print | sed 's/^/ - /' || true
-            echo "::endgroup::"
-            exit 1
-          fi
-
-          echo "== OUT listing =="
-          ls -l "$OUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
