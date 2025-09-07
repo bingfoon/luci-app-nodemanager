@@ -58,8 +58,11 @@ jobs:
           cd "$SDK_DIR"
           cat >> .config <<'EOF'
           CONFIG_TARGET_IMAGES_GZIP=y
+          # 我们的主包 + 中文语言包
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
+          # 预先把 liblua 也选上（确保 staging1 次性就有头文件）
+          CONFIG_PACKAGE_liblua=y
           EOF
           make defconfig
 
@@ -70,6 +73,7 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
+          # 用 tar 管道拷贝，避免“把仓库拷进自己”的循环错误
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -90,17 +94,15 @@ jobs:
           test -x staging_dir/host/bin/po2lmo
           test -x staging_dir/hostpkg/bin/po2lmo
 
-      - name: Symlink system tools into staging (idempotent, no env/command -v)
+      - name: Symlink system tools into staging (meson/ninja/pkg-config/python3)
         run: |
           set -e
           cd "$SDK_DIR"
           mkdir -p staging_dir/hostpkg/bin staging_dir/host/bin
           SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
           for t in meson ninja pkg-config python3; do
             SYS_BIN="$(PATH="$SYS_PATH" /usr/bin/which "$t" 2>/dev/null || true)"
             [ -n "$SYS_BIN" ] && [ -x "$SYS_BIN" ] || { echo "::error::system tool $t not found in $SYS_PATH"; exit 1; }
-
             for dst in "staging_dir/hostpkg/bin/$t" "staging_dir/host/bin/$t"; do
               mkdir -p "$(dirname "$dst")"
               DST_REAL="$(readlink -f "$dst" 2>/dev/null || echo '')"
@@ -114,16 +116,24 @@ jobs:
               fi
             done
           done
-
-          # 将 staging 工具加入 PATH & 导出 PO2LMO
+          # 导出 PATH / PO2LMO
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+
+      # ⬇⬇⬇ 关键修复：先把目标端 Lua 编译出来，提供 lua.h / lua5.1.pc
+      - name: Build target liblua (headers for lucihttp)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 直接编 OpenWrt 源里的 lua（位于 package/utils/lua）
+          make -j"$(nproc)" V=sc package/utils/lua/compile
 
       - name: Prebuild lucihttp (debug-friendly)
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          # 单线程 + 详细日志，失败时输出关键日志
           set +e
           make -j1 V=s package/feeds/luci/lucihttp/compile
           RET=$?
@@ -150,6 +160,7 @@ jobs:
           echo "Using po2lmo: $(command -v po2lmo || true)"
           po2lmo -h || true
 
+          # 主包
           set +e
           make -j1 V=s package/luci-app-nodemanager/compile
           RET=$?
@@ -159,6 +170,7 @@ jobs:
             exit $RET
           fi
 
+          # 中文语言包（两条路径兼容）
           make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
           make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
           RET=$?
