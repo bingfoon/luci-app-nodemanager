@@ -81,8 +81,23 @@ jobs:
         shell: bash
         run: |
           cd "$SDK_DIR"
+          mkdir -p package
           rm -rf package/luci-app-nodemanager
-          cp -a "$GITHUB_WORKSPACE/luci-app-nodemanager" package/
+
+          # 自动检测包源码路径
+          if [ -f "$GITHUB_WORKSPACE/Makefile" ] && grep -q 'PKG_NAME:=luci-app-nodemanager' "$GITHUB_WORKSPACE/Makefile"; then
+            SRC="$GITHUB_WORKSPACE"
+          elif [ -d "$GITHUB_WORKSPACE/luci-app-nodemanager" ]; then
+            SRC="$GITHUB_WORKSPACE/luci-app-nodemanager"
+          else
+            echo "ERROR: cannot locate luci-app-nodemanager source in repo" >&2
+            ls -la "$GITHUB_WORKSPACE"
+            exit 1
+          fi
+
+          cp -a "$SRC" package/luci-app-nodemanager
+          # 可选：避免把 .git 带进 SDK
+          rm -rf package/luci-app-nodemanager/.git
 
       - name: Select packages
         shell: bash
