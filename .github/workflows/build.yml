@@ -5,9 +5,6 @@ name: build-luci-app-nodemanager
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      TERM: xterm
-
     strategy:
       fail-fast: false
       matrix:
@@ -21,12 +18,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build deps (incl. meson/ninja/pkg-config/python3/cmake)
+      - name: Install minimal deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential gawk unzip libncurses5-dev zstd rsync file curl gcc \
-            ninja-build meson pkg-config python3 cmake
+          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl gcc
 
       - name: Download & extract SDK
         run: |
@@ -37,7 +32,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (luci + packages, openwrt-24.10)
+      - name: Setup luci feed (openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -48,11 +43,8 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          cat > feeds.conf <<EOF
-          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
-          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
-          EOF
-          ./scripts/feeds update luci packages
+          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
+          ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
       - name: Seed .config & defconfig
@@ -60,20 +52,19 @@ jobs:
           set -e
           cd "$SDK_DIR"
           cat >> .config <<'EOF'
-          CONFIG_TARGET_IMAGES_GZIP=y
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
-          CONFIG_PACKAGE_liblua=y
           EOF
           make defconfig
 
-      - name: Put our package into SDK (safe copy)
+      - name: Put our package into SDK
         run: |
           set -e
           cd "$GITHUB_WORKSPACE"
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
+          # 用 tar 管道避免把 SDK 自己打进来
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -81,7 +72,7 @@ jobs:
             . \
           | tar -C "$PKGROOT" -xf -
 
-      - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
+      - name: Build po2lmo (LuCI official src)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -89,128 +80,22 @@ jobs:
           make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
-          echo "== host bins ==";    ls -l staging_dir/host/bin    || true
-          echo "== hostpkg bins =="; ls -l staging_dir/hostpkg/bin || true
-          test -x staging_dir/host/bin/po2lmo
-          test -x staging_dir/hostpkg/bin/po2lmo
-
-      - name: "Symlink system tools into staging (idempotent)"
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          mkdir -p staging_dir/hostpkg/bin staging_dir/host/bin
-          SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-          for t in meson ninja pkg-config python3 cmake; do
-            SYS_BIN="$(PATH="$SYS_PATH" /usr/bin/which "$t" 2>/dev/null || true)"
-            [ -n "$SYS_BIN" ] && [ -x "$SYS_BIN" ] || { echo "::error::system tool $t not found in $SYS_PATH"; exit 1; }
-            for dst in "staging_dir/hostpkg/bin/$t" "staging_dir/host/bin/$t"; do
-              mkdir -p "$(dirname "$dst")"
-              DST_REAL="$(readlink -f "$dst" 2>/dev/null || echo '')"
-              SYS_REAL="$(readlink -f "$SYS_BIN")"
-              if [ "$DST_REAL" = "$SYS_REAL" ]; then
-                echo "skip linking $dst (already -> $SYS_REAL)"
-              else
-                rm -f "$dst"
-                ln -s "$SYS_BIN" "$dst"
-                echo "linked $dst -> $SYS_BIN"
-              fi
-            done
-          done
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # 为 lucihttp 提供 lua.h：自动探测 + 正确映射 make 目标
-      - name: "Build target Lua (headers for lucihttp; robust probe)"
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          # 先尝试在 feeds 安装几种 Lua 变体（存在就跳过）
-          ./scripts/feeds install -p packages lua    || true
-          ./scripts/feeds install -p packages lua5.3 || true
-          ./scripts/feeds install -p packages lua5.4 || true
-
-          CANDIDATES="
-          package/lang/lua
-          package/libs/lua
-          feeds/packages/lang/lua
-          feeds/packages/lang/lua5.3
-          feeds/packages/lang/lua5.4
-          "
-
-          built=""
-          for P in $CANDIDATES; do
-            if [ -f "$P/Makefile" ]; then
-              if [[ "$P" == feeds/* ]]; then
-                # 正确的 feeds 目标需要 'package/feeds/...'
-                TGT="package/feeds/${P#feeds/}/compile"
-              else
-                # 核心树用原样路径即可
-                TGT="$P/compile"
-              fi
-              echo "::group::Build $P -> make $TGT"
-              make -j"$(nproc)" V=sc "$TGT"
-              echo "::endgroup::"
-              built="yes"
-              break
-            fi
-          done
-
-          if [ -z "$built" ]; then
-            echo "::error::Lua package not found in core or feeds (tried: $CANDIDATES)"
-            echo "== hint =="
-            echo "ls package/lang/ ; ls package/libs/ ; ls feeds/packages/lang/ || true"
-            exit 1
-          fi
-
-      - name: "Prebuild lucihttp (debug-friendly)"
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          set +e
-          make -j1 V=s package/feeds/luci/lucihttp/compile
-          RET=$?
-          set -e
-          if [ $RET -ne 0 ]; then
-            echo "==== lucihttp build logs (last 200) ===="
-            find build_dir -type f -name '*lucihttp*log*' -exec tail -n 200 {} \; || true
-            exit $RET
-          fi
-
-      - name: "Sanity check zh-cn PO domain"
-        run: |
-          set -e
-          cd "$SDK_DIR/package/luci-app-nodemanager"
-          test -s po/zh-cn/nodemanager.po || { echo "::error::missing po/zh-cn/nodemanager.po (domain must be 'nodemanager')"; exit 1; }
-
-      - name: "Build app + zh-cn i18n (force, debug on failure)"
+      - name: Build app + zh-cn i18n
         run: |
           set -e
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
 
-          echo "Using po2lmo: $(command -v po2lmo || true)"
-          po2lmo -h || true
-
-          set +e
+          # 主包
           make -j1 V=s package/luci-app-nodemanager/compile
-          RET=$?
-          if [ $RET -ne 0 ]; then
-            echo "==== DUMP luci-app logs ===="
-            find build_dir -type f -name '*luci-app-nodemanager*log*' -exec tail -n 200 {} \; || true
-            exit $RET
-          fi
 
+          # 语言包（两种路径都试一下，兼容不同 luci feed 结构）
           make -j1 V=s package/luci-i18n-nodemanager-zh-cn/compile || \
           make -j1 V=s package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile
-          RET=$?
-          set -e
-          if [ $RET -ne 0 ]; then
-            echo '==== DUMP i18n logs ===='
-            find build_dir -type f -name '*luci-i18n-nodemanager-zh-cn*log*' -exec tail -n 200 {} \; || true
-            exit $RET
-          fi
 
       - name: Collect artifacts
         run: |
