@@ -51,7 +51,7 @@ jobs:
           ./scripts/feeds install -p luci luci-base luci-compat
           ./scripts/feeds install -p core libnl-tiny
 
-      - name: Hard-disable lucihttp
+      - name: Hard-disable lucihttp (avoid lua.h/meson/ninja)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -87,16 +87,41 @@ jobs:
             --exclude "$SDK_DIR" \
             ./ "$PKGROOT/"
 
-      - name: Re-defconfig AFTER adding local package
+      - name: Normalize package layout (auto-fix nested dir)
+        run: |
+          set -e
+          cd "$SDK_DIR/package"
+          if [ ! -f luci-app-nodemanager/Makefile ]; then
+            # 常见情形：luci-app-nodemanager/luci-app-nodemanager/Makefile
+            if [ -f luci-app-nodemanager/luci-app-nodemanager/Makefile ]; then
+              echo "Flatten nested luci-app-nodemanager/..."
+              rsync -a luci-app-nodemanager/luci-app-nodemanager/ luci-app-nodemanager/
+              rm -rf luci-app-nodemanager/luci-app-nodemanager
+            else
+              echo "::error::Makefile not found in package/luci-app-nodemanager"
+              find luci-app-nodemanager -maxdepth 3 -type f -name 'Makefile' -print || true
+              exit 1
+            fi
+          fi
+          echo "== package tree =="
+          find luci-app-nodemanager -maxdepth 2 -type f -print
+
+      - name: Re-defconfig AFTER adding/fixing local package
         run: |
           set -e
           cd "$SDK_DIR"
           make defconfig
-          grep -q '^CONFIG_PACKAGE_luci-app-nodemanager=y' .config || { echo "::error::CONFIG_PACKAGE_luci-app-nodemanager not set"; exit 1; }
+          if ! grep -q '^CONFIG_PACKAGE_luci-app-nodemanager=y' .config; then
+            echo "::warning::CONFIG_PACKAGE_luci-app-nodemanager not present; force enable and defconfig again"
+            echo 'CONFIG_PACKAGE_luci-app-nodemanager=y' >> .config
+            make defconfig
+          fi
           if ! grep -q '^CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y' .config; then
             echo 'CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y' >> .config
             make defconfig
           fi
+          echo "== .config sanity =="
+          grep -E 'CONFIG_PACKAGE_luci-(app-nodemanager|i18n-nodemanager-zh-cn)=y' .config
 
       - name: Build po2lmo (host tool)
         run: |
@@ -109,7 +134,7 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      - name: Pre-build libnl-tiny (for rpcd-mod-luci)
+      - name: Pre-build libnl-tiny (for rpcd-mod-luci headers)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -122,6 +147,7 @@ jobs:
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="${PO2LMO:-$PWD/staging_dir/hostpkg/bin/po2lmo}"
+          # 只编 .config 选中的包（主包+中文i18n子包）
           make -j"$(nproc)" V=s package/compile
           make -j1 V=s package/install
           echo "::group::IPK list"
