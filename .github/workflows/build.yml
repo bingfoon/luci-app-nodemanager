@@ -107,10 +107,17 @@ jobs:
           make package/luci-app-nodemanager/{clean,compile} V=s -j"$(nproc)"
           find bin/ -name 'luci-app-nodemanager*_all.ipk' -o -name 'luci-i18n-nodemanager-*_all.ipk' -print
 
-      - name: Upload ipk
+      - name: List build outputs
+        shell: bash
+        run: |
+          cd "$SDK_DIR"
+          find bin -maxdepth 3 -type f -name '*.ipk' -print
+
+      - name: Upload IPKs
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-nodemanager-${{ matrix.target.arch }}-${{ matrix.target.sub }}
+          name: luci-app-nodemanager-mediatek-filogic
           path: |
-            sdk/bin/packages/*/*/luci-app-nodemanager_*.ipk
-            sdk/bin/packages/*/*/luci-i18n-nodemanager-*.ipk
+            ${{ env.SDK_DIR }}/bin/packages/*/*/luci-app-nodemanager_*.ipk
+            ${{ env.SDK_DIR }}/bin/packages/*/*/luci-i18n-nodemanager-*.ipk
+          if-no-files-found: warn
