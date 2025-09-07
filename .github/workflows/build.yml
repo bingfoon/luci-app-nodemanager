@@ -1,5 +1,5 @@
 name: build-luci-app-nodemanager
-on:
+'on':
   workflow_dispatch:
 
 jobs:
@@ -10,9 +10,9 @@ jobs:
       matrix:
         target:
           - name: mediatek-filogic
-            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           - name: x86-64
-            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -21,7 +21,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip libncurses5-dev zstd rsync file curl
+          sudo apt-get install -y build-essential gawk unzip libncurses5-dev zstd rsync file curl gcc
 
       - name: Download & extract SDK
         run: |
@@ -47,14 +47,14 @@ jobs:
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
-      - name: Build po2lmo (robust: find sources & gcc)
+      - name: "Build po2lmo (robust: find sources & gcc)"
         run: |
           set -e
           cd "$SDK_DIR"
-          # 在 luci 源中查找 po2lmo 与 template_lmo 源文件
-          PO2C="$(grep -R -l --null -E '/po2lmo\.c$|^po2lmo\.c$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
-          TLC="$(grep -R -l --null -E '/template_lmo\.c$|^template_lmo\.c$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
-          TLH="$(grep -R -l --null -E '/template_lmo\.h$|^template_lmo\.h$' feeds/luci | tr '\0' '\n' | head -n1 || true)"
+          # 在 luci 源中定位 po2lmo 与 template_lmo 源文件（路径在不同分支可能不同）
+          PO2C="$(grep -R -l -E '/po2lmo\.c$|^po2lmo\.c$' feeds/luci | head -n1 || true)"
+          TLC="$(grep -R -l -E '/template_lmo\.c$|^template_lmo\.c$' feeds/luci | head -n1 || true)"
+          TLH="$(grep -R -l -E '/template_lmo\.h$|^template_lmo\.h$' feeds/luci | head -n1 || true)"
           echo "PO2C=$PO2C"
           echo "TLC=$TLC"
           echo "TLH=$TLH"
@@ -112,10 +112,10 @@ jobs:
         run: |
           set -e
           cd "$SDK_DIR"
-          make package/luci-app-nodemanager/compile -j$(nproc) V=sc
-          # 显式构建中文语言包；不同 SDK/feeds 结构兼容两条路径
-          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc || \
-          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
+          make package/luci-app-nodemanager/compile -j"$(nproc)" V=sc
+          # 显式构建中文语言包；兼容不同 feeds 命名
+          make package/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc || \
+          make package/feeds/luci/luci-i18n-nodemanager-zh-cn/compile -j"$(nproc)" V=sc
 
       - name: Collect artifacts
         run: |
