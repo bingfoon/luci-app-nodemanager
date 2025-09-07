@@ -32,7 +32,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (luci only, openwrt-24.10)
+      - name: Setup feeds (luci + packages, openwrt-24.10)
         run: |
           set -e
           cd "$SDK_DIR"
@@ -43,9 +43,18 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
           fi
-          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
-          ./scripts/feeds update luci
+          cat > feeds.conf <<EOF
+          src-git luci https://github.com/openwrt/luci.git;${BRANCH}
+          src-git packages https://github.com/openwrt/packages.git;${BRANCH}
+          EOF
+
+          ./scripts/feeds update luci packages
+
+          # LuCI 运行时（不强制启用编译，只装符号链接）
           ./scripts/feeds install -p luci luci-base luci-compat
+
+          # lucihttp(目标包) 的构建依赖：meson/ninja/pkgconf/python3（host工具）
+          ./scripts/feeds install -p packages meson ninja pkgconf python3
 
       - name: "Build po2lmo (via luci src Makefile -> host+hostpkg)"
         run: |
@@ -73,6 +82,19 @@ jobs:
           # 导出给后续 step
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+
+      - name: "Build host tools for meson (python3/ninja/meson/pkgconf)"
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 逐个把 host 工具编进 staging_dir/hostpkg/bin
+          make -j"$(nproc)" V=sc package/feeds/packages/python3/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/ninja/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/meson/host/compile
+          make -j"$(nproc)" V=sc package/feeds/packages/pkgconf/host/compile
+
+          # 放进 PATH，给后续 lucihttp/应用编译用
+          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Put our package into SDK (safe copy)
         run: |
@@ -108,6 +130,24 @@ jobs:
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
           EOF
           make defconfig
+
+      - name: "Prebuild lucihttp (debug-friendly)"
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          # 确保 host 工具在 PATH
+          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+
+          # 单线程 + 详细日志预编 lucihttp
+          set +e
+          make -j1 V=s package/feeds/luci/lucihttp/compile
+          RET=$?
+          set -e
+          if [ $RET -ne 0 ]; then
+            echo "==== lucihttp build logs (last 200 lines) ===="
+            find build_dir -type f -name '*lucihttp*log*' -exec tail -n 200 {} \; || true
+            exit $RET
+          fi
 
       - name: "Build app + zh-cn i18n (force, debug on failure)"
         run: |
