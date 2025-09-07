@@ -18,7 +18,6 @@ proxies:
   # 落地节点信息必须添加在这一行上面
   - {name: 直连, type: direct}
 
-# 全局配置 
 port: 7890
 socks-port: 7891
 redir-port: 7892

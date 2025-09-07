@@ -3,19 +3,14 @@ local sys  = require "luci.sys"
 
 local M = {}
 
--- Safe insert shim (tolerate wrong arg order from legacy code)
-do
-  local _insert = table.insert
-  function table.insert(t, a, b)
-    if b == nil then return _insert(t, a) end
-    if type(a) ~= "number" then return _insert(t, b) end
-    return _insert(t, a, b)
-  end
-end
-
 -- Defaults
 local DEFAULT_CFG = "/etc/nikki/profiles/config.yaml"
 local DEFAULT_TPL = "/usr/share/nodemanager/config.template.yaml"
+
+-- Runtime path cache
+local RUNDIR = "/var/run/nodemanager"
+local RUN_PATH_FILE = RUNDIR .. "/path"
+local RUN_TPL_FILE  = RUNDIR .. "/template"
 
 -- Helpers
 local function trim(s) return (s or ""):gsub("^%s+",""):gsub("%s+$","") end
@@ -31,14 +26,11 @@ local function strip_trailing_blank(lines)
   return lines
 end
 
--- UCI helpers (self-heal if package missing)
-local function uci_cursor()
-  return require("luci.model.uci").cursor()
-end
+-- UCI helpers
+local function uci_cursor() return require("luci.model.uci").cursor() end
 
 local function ensure_uci_pkg()
-  local uci = require("luci.model.uci").cursor()
-  -- if no /etc/config/nodemanager or no section, create one default 'main'
+  local uci = uci_cursor()
   local sid = uci:get_first("nodemanager", "main") or uci:get_first("nodemanager", "config")
   if not sid then
     sid = uci:add("nodemanager", "main")
@@ -50,7 +42,7 @@ end
 
 local function read_uci_paths()
   ensure_uci_pkg()
-  local uci = require("luci.model.uci").cursor()
+  local uci = uci_cursor()
   local path = uci:get("nodemanager", "config", "path")
   local tpl  = uci:get("nodemanager", "config", "template")
   path = path or uci:get_first("nodemanager", "main", "path")
@@ -60,32 +52,51 @@ local function read_uci_paths()
   return path, tpl
 end
 
+local function read_run_cache(kind)
+  local f = (kind == "path") and RUN_PATH_FILE or RUN_TPL_FILE
+  if fs.access(f) then
+    local s = fs.readfile(f)
+    if s then s = trim(s) end
+    if s and #s > 0 then return s end
+  end
+end
+
+local function write_run_cache(path, tpl)
+  sys.call(string.format("mkdir -p %q >/dev/null 2>&1", RUNDIR))
+  if path and #path>0 then fs.writefile(RUN_PATH_FILE, path) end
+  if tpl and #tpl>0  then fs.writefile(RUN_TPL_FILE,  tpl)  end
+end
+
 function M.get_settings()
+  local p_run = read_run_cache("path")
+  local t_run = read_run_cache("tpl")
   local p, t = read_uci_paths()
-  return { path = p or DEFAULT_CFG, template = t or DEFAULT_TPL }
+  return { path = p_run or p or DEFAULT_CFG, template = t_run or t or DEFAULT_TPL }
 end
 
 function M.set_settings(path, template)
   ensure_uci_pkg()
-  local uci = require("luci.model.uci").cursor()
+  local uci = uci_cursor()
   local sid = uci:get_first("nodemanager", "main") or uci:get_first("nodemanager", "config")
   if not sid then sid = uci:add("nodemanager", "main") end
   if path and #path > 0 then uci:set("nodemanager", sid, "path", path) end
   if template and #template > 0 then uci:set("nodemanager", sid, "template", template) end
-  uci:save("nodemanager")
-  uci:commit("nodemanager")
+  uci:save("nodemanager"); uci:commit("nodemanager")
+  write_run_cache(path or "", template or "")
 end
 
 local function conf_path()
+  local p_run = read_run_cache("path")
+  if p_run and #p_run > 0 then return p_run end
   local p = read_uci_paths()
-  if type(p) == "table" then p = p[1] end
   if not p or #p == 0 then p = DEFAULT_CFG end
   return p
 end
 
 local function tpl_path()
+  local t_run = read_run_cache("tpl")
+  if t_run and #t_run > 0 then return t_run end
   local _, t = read_uci_paths()
-  if type(t) == "table" then t = t[1] end
   if not t or #t == 0 then t = DEFAULT_TPL end
   return t
 end
@@ -113,7 +124,6 @@ proxies:
   # 落地节点信息必须添加在这一行上面
   - {name: 直连, type: direct}
 
-# 全局配置 
 port: 7890
 socks-port: 7891
 redir-port: 7892
@@ -279,10 +289,10 @@ rule-providers:
   telegram_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
   netflix_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
   apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
+
 ]===]
 end
 
--- Ensure target config file exists, use template or fallback
 function M.ensure_file(path_override, tpl_override)
   ensure_uci_pkg()
   local path = path_override or conf_path()
@@ -296,12 +306,12 @@ function M.ensure_file(path_override, tpl_override)
   return fs.access(path), path
 end
 
--- File IO
 local function ensure_config_exists()
   local ok, p = M.ensure_file()
   return p
 end
 
+-- IO
 local function read_lines(path)
   path = path or ensure_config_exists()
   local s = fs.readfile(path) or ""
@@ -324,7 +334,7 @@ local function write_lines(lines, path)
   return fs.writefile(path, table.concat(lines, "\n").."\n")
 end
 
--- YAML-ish range helpers
+-- Block helpers
 local function ensure_anchor_block(lines, header, start_hint, end_hint)
   local header_pat = "^%s*" .. header .. ":%s*$"
   local header_idx
@@ -398,7 +408,7 @@ end
 local function parse_bindmap(lines)
   local map = {}
   for _,l in ipairs(lines) do
-    local ip, name = l:match("^%s*%-%s*SRC%-IP%-CIDR,([^,/]+)/32,([^\r\n]+)$")
+    local ip, mask, name = l:match("^%s*%-%s*SRC%-IP%-CIDR,([%d%.]+)/(%d+),(.+)$")
     if ip and name then
       ip = trim(ip); name = trim(name)
       if ip and ip ~= "" and is_ipv4(ip) then
@@ -483,7 +493,7 @@ function M.load_all()
   return { proxies = proxies, bindmap = bindmap, providers = providers, dns_servers = dns_servers }
 end
 
--- Forms parsing
+-- === Forms ===
 function M.parse_proxy_form(form)
   local names     = form["name[]"]      or form.name
   local servers   = form["server[]"]    or form.server
@@ -592,6 +602,7 @@ function M.parse_dns_form(form)
   return true, list
 end
 
+-- Save with auto /24 if last octet is 0
 function M.save_proxies_and_rules(list)
   local lines = read_lines()
 
@@ -635,9 +646,11 @@ function M.save_proxies_and_rules(list)
       local local_seen = {}
       for _,ip in ipairs(x.bindips) do
         if not local_seen[ip] then
-          local pair = ip .. "\0" .. x.name
+          local last = ip:match("%.(%d+)$")
+          local mask = (last == "0") and 24 or 32
+          local pair = (ip .. "/" .. mask) .. "\0" .. x.name
           if not seen[pair] then
-            table.insert(newr, string.format('  - SRC-IP-CIDR,%s/32,%s', ip, x.name))
+            table.insert(newr, string.format('  - SRC-IP-CIDR,%s/%d,%s', ip, mask, x.name))
             seen[pair] = true
           end
           local_seen[ip] = true
@@ -660,7 +673,7 @@ function M.save_proxies_and_rules(list)
     lines = out
   end
 
-  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(lines), "\n").."\n") ~= nil), nil
+  return write_lines(lines) ~= nil, nil
 end
 
 function M.save_providers(list)
@@ -687,7 +700,7 @@ function M.save_providers(list)
     table.insert(out, string.format('    url: "%s"', p.url))
   end
   for i=end_idx+1,#lines do table.insert(out, lines[i]) end
-  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
+  return write_lines(out) ~= nil, nil
 end
 
 function M.save_dns_servers(servers)
@@ -701,7 +714,7 @@ function M.save_dns_servers(servers)
     table.insert(lines, "dns:")
     table.insert(lines, "  nameserver:")
     for _,ip in ipairs(servers) do table.insert(lines, string.format("    - %s", ip)) end
-    return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(lines), "\n").."\n") ~= nil), nil
+    return write_lines(lines) ~= nil, nil
   end
 
   local ns_start, ns_end
@@ -729,7 +742,7 @@ function M.save_dns_servers(servers)
         for _,ip in ipairs(servers) do table.insert(out, string.format("    - %s", ip)) end
       end
     end
-    return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
+    return write_lines(out) ~= nil, nil
   end
 
   local out = {}
@@ -738,7 +751,7 @@ function M.save_dns_servers(servers)
     table.insert(out, string.format("    - %s", ip))
   end
   for i=(ns_end or ns_start)+1,#lines do table.insert(out, lines[i]) end
-  return (fs.writefile(conf_path(), table.concat(strip_trailing_blank(out), "\n").."\n") ~= nil), nil
+  return write_lines(out) ~= nil, nil
 end
 
 function M.conf_path() return conf_path() end

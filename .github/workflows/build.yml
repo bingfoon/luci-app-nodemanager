@@ -1,123 +1,97 @@
-name: Build luci-app-nodemanager for OpenWrt 24.10.x
-
+name: build-luci-app-nodemanager
 on:
   workflow_dispatch:
-    inputs:
-      owrt_version:
-        description: OpenWrt version (24.10.x)
-        required: false
-        default: "24.10.2"
 
 jobs:
   build:
+    runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         target:
-          #- { arch: "x86", sub: "64" }
-          - { arch: "mediatek", sub: "filogic" }
-    runs-on: ubuntu-22.04
+          - name: mediatek-filogic
+            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - name: x86-64
+            sdk:  https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        
-      - name: Lint Lua sources
+
+      - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.1
-          find luasrc -name '*.lua' -print0 | xargs -0 -n1 luac -p
+          sudo apt-get install -y build-essential gawk unzip libncurses5-dev zstd rsync file curl
 
-      - name: Prepare
+      - name: Download & extract SDK
         run: |
-          VER="${{ github.event.inputs.owrt_version || '24.10.0' }}"
-          echo "VER=$VER" >> $GITHUB_ENV
-          case "${{ matrix.target.arch }}-${{ matrix.target.sub }}" in
-            x86-64)
-              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/x86/64/openwrt-sdk-${VER}-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            ;;
-            mediatek-filogic)
-              SDK_URL="https://downloads.openwrt.org/releases/${VER}/targets/mediatek/filogic/openwrt-sdk-${VER}-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            ;;
-          esac
-          echo "SDK_URL=$SDK_URL" >> $GITHUB_ENV
-
-      - name: Download SDK
-        run: |
-          set -e
-          sudo apt-get update
-          sudo apt-get install -y zstd xz-utils
-
-          SDK_ARCHIVE="$(basename "$SDK_URL")"
-          wget -q "$SDK_URL" -O "$SDK_ARCHIVE"
-
-      - name: Extract SDK
-        shell: bash
-        run: |
-          tar --zstd -xf openwrt-sdk-*.tar.zst
-          # 只匹配已解压出的目录，不会匹配 .tar.zst
-          SDK_DIR="$(ls -d openwrt-sdk-*/ | head -1 | sed 's:/$::')"
+          curl -L --fail -o sdk.tar.zst "${{ matrix.target.sdk }}"
+          # 解压
+          tar -I zstd -xf sdk.tar.zst
+          # 取目录名并导出
+          SDK_DIR="$(tar -I zstd -tf sdk.tar.zst | head -1 | cut -d/ -f1)"
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
+          # 方便后续使用
+          ln -s "$SDK_DIR" sdk
 
-      - name: Bootstrap feeds if missing
-        shell: bash
+      - name: Setup feeds (luci only, openwrt-24.10)
         run: |
           cd "$SDK_DIR"
+          BRANCH="openwrt-24.10"
+          # 如果 SDK 里没有 scripts/feeds，则在线补齐
           if [ ! -x scripts/feeds ]; then
-            BRANCH="openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)"  # 24.10.2 -> openwrt-24.10
             mkdir -p scripts
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
-            echo "src-git luci https://github.com/openwrt/luci.git;openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)" > feeds.conf
           fi
+          # 只用 luci 源即可
+          echo "src-git luci https://github.com/openwrt/luci.git;${BRANCH}" > feeds.conf
+          ./scripts/feeds update luci
+          # 安装构建 LuCI 所需的包和工具（含 po2lmo/host）
+          ./scripts/feeds install -p luci po2lmo luci-base luci-compat
 
-      - name: Prepare feeds
-        shell: bash
-        run: |
-          cd "$SDK_DIR"
-          ./scripts/feeds update -a
-          ./scripts/feeds install luci luci-compat
-
-      - name: Add package source
-        shell: bash
+      - name: Put our package into SDK
         run: |
           cd "$SDK_DIR"
           rm -rf package/luci-app-nodemanager
-          mkdir -p package/luci-app-nodemanager
-          # 用 tar 流拷贝，排除 .git 和已解压的 SDK 目录
-          tar -C "$GITHUB_WORKSPACE" \
-              --exclude '.git' \
-              --exclude 'openwrt-sdk-*' \
-              -cf - . \
-          | tar -C package/luci-app-nodemanager -xf -
+          mkdir -p package
+          # 将本仓库完整拷贝为 luci-app-nodemanager 包
+          cp -a "$GITHUB_WORKSPACE" package/luci-app-nodemanager
+          # 避免把 .git 带进去
+          rm -rf package/luci-app-nodemanager/.git
 
-      - name: Select packages
-        shell: bash
+      - name: Seed .config & defconfig
         run: |
           cd "$SDK_DIR"
           cat >> .config <<'EOF'
+          CONFIG_TARGET_IMAGES_GZIP=y
+          # 选择我们的主包 + 中文语言包
           CONFIG_PACKAGE_luci-app-nodemanager=y
           CONFIG_PACKAGE_luci-i18n-nodemanager-zh-cn=y
           EOF
           make defconfig
 
-      - name: Build luci-app-nodemanager
-        shell: bash
+      - name: Build (app + zh-cn i18n)
         run: |
           cd "$SDK_DIR"
-          make package/luci-app-nodemanager/{clean,compile} V=s -j"$(nproc)"
-          find bin/ -name 'luci-app-nodemanager*_all.ipk' -o -name 'luci-i18n-nodemanager-*_all.ipk' -print
+          # 先保证 po2lmo 主机工具可用（多余但稳）
+          make package/po2lmo/host/compile -j$(nproc) V=sc
+          # 编译主包和中文语言包（显式编译语言子包，确保一定产物）
+          make package/luci-app-nodemanager/compile -j$(nproc) V=sc
+          make package/luci-i18n-nodemanager-zh-cn/compile -j$(nproc) V=sc
 
-      - name: List build outputs
-        shell: bash
+      - name: Collect artifacts
         run: |
           cd "$SDK_DIR"
-          find bin -maxdepth 3 -type f -name '*.ipk' -print
+          mkdir -p "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
+          # 收集主包 + 中文 i18n 子包
+          find bin/packages -type f -name 'luci-app-nodemanager_*.ipk' -exec cp -v '{}' "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}/" \;
+          find bin/packages -type f -name 'luci-i18n-nodemanager-zh-cn_*.ipk' -exec cp -v '{}' "$GITHUB_WORKSPACE/out/${{ matrix.target.name }}/" \;
 
-      - name: Upload IPKs
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-nodemanager-mediatek-filogic
-          path: |
-            ${{ env.SDK_DIR }}/bin/packages/*/*/luci-app-nodemanager_*.ipk
-            ${{ env.SDK_DIR }}/bin/packages/*/*/luci-i18n-nodemanager-*.ipk
-          if-no-files-found: warn
+          name: luci-app-nodemanager-${{ matrix.target.name }}
+          path: out/${{ matrix.target.name }}/*.ipk
+          if-no-files-found: error

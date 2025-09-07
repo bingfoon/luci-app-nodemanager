@@ -31,7 +31,8 @@ function action_proxies()
 	if http.getenv("REQUEST_METHOD") == "POST" then
 		local ok, list, err = util.parse_proxy_form(http.formvalue())
 		if not ok then return json({code=1, msg=err}) end
-		local ok2, err2 = util.save_proxies_and_rules(list or {})
+		local okc, ok2, err2 = pcall(util.save_proxies_and_rules, list or {})
+		if not okc then return json({code=1, msg="runtime: "..tostring(ok2)}) end
 		if not ok2 then return json({code=1, msg=err2 or "save failed"}) end
 		return json({code=0})
 	end
@@ -66,7 +67,8 @@ function action_providers()
 	if http.getenv("REQUEST_METHOD") == "POST" then
 		local ok, list, err = util.parse_provider_form(http.formvalue())
 		if not ok then return json({code=1, msg=err}) end
-		local ok2, err2 = util.save_providers(list or {})
+		local okc, ok2, err2 = pcall(util.save_providers, list or {})
+		if not okc then return json({code=1, msg="runtime: "..tostring(ok2)}) end
 		if not ok2 then return json({code=1, msg=err2 or "save failed"}) end
 		return json({code=0})
 	end
@@ -85,7 +87,8 @@ function action_dns()
 	if http.getenv("REQUEST_METHOD") == "POST" then
 		local ok, list, err = util.parse_dns_form(http.formvalue())
 		if not ok then return json({code=1, msg=err}) end
-		local ok2, err2 = util.save_dns_servers(list or {})
+		local okc, ok2, err2 = pcall(util.save_dns_servers, list or {})
+		if not okc then return json({code=1, msg="runtime: "..tostring(ok2)}) end
 		if not ok2 then return json({code=1, msg=err2 or "save failed"}) end
 		return json({code=0})
 	end
@@ -105,10 +108,11 @@ function action_settings()
 		local path = (http.formvalue("path") or ""):gsub("%s+$","")
 		local tpl  = (http.formvalue("template") or ""):gsub("%s+$","")
 		if path == "" then return json({code=1, msg="Config path cannot be empty"}) end
-		util.set_settings(path, tpl)
+		local okc, err = pcall(util.set_settings, path, tpl)
+		if not okc then return json({code=1, msg="runtime: "..tostring(err)}) end
 		if http.formvalue("create") == "1" then
-			local ok, p = util.ensure_file(path, (tpl ~= "" and tpl or nil))
-			if not ok then return json({code=1, msg="Failed to create "..tostring(p)}) end
+			local ok2, p = util.ensure_file(path, (tpl ~= "" and tpl or nil))
+			if not ok2 then return json({code=1, msg="Failed to create "..tostring(p)}) end
 		end
 		return json({code=0})
 	end
