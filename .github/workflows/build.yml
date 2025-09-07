@@ -11,8 +11,8 @@ jobs:
         target:
           - name: mediatek-filogic
             sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          - name: x86-64
-            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          #- name: x86-64
+          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -47,28 +47,18 @@ jobs:
           ./scripts/feeds update luci
           ./scripts/feeds install -p luci luci-base luci-compat
 
-      - name: "Build po2lmo (robust: find sources & gcc)"
+      - name: "Build po2lmo (via luci src Makefile)"
         run: |
           set -e
           cd "$SDK_DIR"
-          # 在 luci 源中定位 po2lmo 与 template_lmo 源文件（路径在不同分支可能不同）
-          PO2C="$(grep -R -l -E '/po2lmo\.c$|^po2lmo\.c$' feeds/luci | head -n1 || true)"
-          TLC="$(grep -R -l -E '/template_lmo\.c$|^template_lmo\.c$' feeds/luci | head -n1 || true)"
-          TLH="$(grep -R -l -E '/template_lmo\.h$|^template_lmo\.h$' feeds/luci | head -n1 || true)"
-          echo "PO2C=$PO2C"
-          echo "TLC=$TLC"
-          echo "TLH=$TLH"
-          if [ -z "$PO2C" ] || [ -z "$TLC" ] || [ -z "$TLH" ]; then
-            echo "::error::po2lmo sources not found in feeds/luci"
+          # 直接用 luci-base 的 src 目录 Makefile 生成 po2lmo
+          test -d feeds/luci/modules/luci-base/src || {
+            echo "::error::luci-base src not found (feeds not set to openwrt-24.10?)"
             exit 1
-          fi
-          TMPDIR="$(mktemp -d)"
-          cp "$PO2C" "$TMPDIR/po2lmo.c"
-          cp "$TLC"  "$TMPDIR/template_lmo.c"
-          cp "$TLH"  "$TMPDIR/template_lmo.h"
-          gcc -O2 "$TMPDIR/po2lmo.c" "$TMPDIR/template_lmo.c" -o "$TMPDIR/po2lmo"
+          }
+          make -C feeds/luci/modules/luci-base/src clean po2lmo V=sc
           mkdir -p staging_dir/host/bin
-          install -m0755 "$TMPDIR/po2lmo" staging_dir/host/bin/po2lmo
+          install -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
           echo "== staging_dir/host/bin =="
           ls -l staging_dir/host/bin
           test -x staging_dir/host/bin/po2lmo
