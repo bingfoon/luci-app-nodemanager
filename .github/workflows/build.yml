@@ -119,26 +119,45 @@ jobs:
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
 
-      # 关键修复：为 lucihttp 准备 lua.h & lua.pc
-      - name: "Build target Lua (headers for lucihttp; probe paths)"
+      # 为 lucihttp 提供 lua.h：多路径探测 + 自动回退（核心树优先，其次 feeds）
+      - name: "Build target Lua (headers for lucihttp; robust probe)"
         run: |
           set -e
           cd "$SDK_DIR"
-          if [ -f package/lang/lua/Makefile ]; then
-            echo "::notice::building core package/lang/lua"
-            make -j"$(nproc)" V=sc package/lang/lua/compile
-          elif [ -f package/libs/lua/Makefile ]; then
-            echo "::notice::building core package/libs/lua"
-            make -j"$(nproc)" V=sc package/libs/lua/compile
-          else
-            echo "::warning::core lua not found, fallback to feeds/packages"
-            ./scripts/feeds install -p packages lua || true
-            if [ -f feeds/packages/lang/lua/Makefile ]; then
-              make -j"$(nproc)" V=sc package/feeds/packages/lua/compile
-            else
-              echo "::error::lua package not found in core or feeds (needed for lua.h)"
-              exit 1
+
+          # 先把 packages feed 里的 lua 变体装上（存在即跳过）
+          ./scripts/feeds install -p packages lua  || true
+          ./scripts/feeds install -p packages lua5.3 || true
+          ./scripts/feeds install -p packages lua5.4 || true
+
+          # 依次探测以下可能路径（存在即使用）
+          CANDIDATES="
+          package/lang/lua
+          package/libs/lua
+          feeds/packages/lang/lua
+          feeds/packages/lang/lua5.3
+          feeds/packages/lang/lua5.4
+          "
+
+          built=""
+          for P in $CANDIDATES; do
+            if [ -f "$P/Makefile" ]; then
+              if [[ "$P" == feeds/* ]]; then
+                TGT="package/${P#feeds/}/compile"
+              else
+                TGT="package/${P#package/}/compile"
+              fi
+              echo "::group::Build $P -> make $TGT"
+              make -j"$(nproc)" V=sc "$TGT"
+              echo "::endgroup::"
+              built="yes"
+              break
             fi
+          done
+
+          if [ -z "$built" ]; then
+            echo "::error::Lua package not found in core or feeds (tried: $CANDIDATES)"
+            exit 1
           fi
 
       - name: "Prebuild lucihttp (debug-friendly)"
