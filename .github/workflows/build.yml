@@ -67,10 +67,7 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
             curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
             chmod +x scripts/feeds
-            # 注意：EOF 行前不能有缩进！
-            cat > feeds.conf <<EOF
-            src-git luci https://github.com/openwrt/luci.git;${BRANCH}
-            EOF
+            echo "src-git luci https://github.com/openwrt/luci.git;openwrt-$(echo "${VER:-24.10.2}" | cut -d. -f1,2)" > feeds.conf
           fi
 
       - name: Prepare feeds
