@@ -51,14 +51,12 @@ jobs:
         run: |
           set -e
           cd "$SDK_DIR"
-          # 物理移除 lucihttp 包，避免被任何依赖链意外拉起
           rm -rf feeds/luci/contrib/package/lucihttp || true
 
       - name: Seed .config & defconfig
         run: |
           set -e
           cd "$SDK_DIR"
-          # 只启用我们的包与中文语言包，并明确关闭 lucihttp*
           cat > .config <<'EOF'
           CONFIG_ALL=n
           CONFIG_ALL_KMODS=n
@@ -79,7 +77,6 @@ jobs:
           PKGROOT="$GITHUB_WORKSPACE/$SDK_DIR/package/luci-app-nodemanager"
           rm -rf "$PKGROOT"
           mkdir -p "$PKGROOT"
-          # 用 tar 管道避免把 SDK 自己打回去
           tar -cf - \
             --exclude='./.git' \
             --exclude="./$SDK_DIR" \
@@ -97,6 +94,19 @@ jobs:
           install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
           echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
           echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+
+      # ★ 新增：先把 libnl-tiny 目标端编出来，提供 netlink/msg.h 给 rpcd-mod-luci
+      - name: Build libnl-tiny (target headers for rpcd-mod-luci)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          make -j"$(nproc)" V=s package/libs/libnl-tiny/compile
+          # 保险检测头文件是否已进入 staging
+          if ! ls staging_dir/target-*/usr/include/libnl-tiny/netlink/msg.h >/dev/null 2>&1; then
+            echo "::error::libnl-tiny headers missing after build (netlink/msg.h)"
+            find staging_dir -path '*/usr/include/libnl-tiny' -maxdepth 3 -type f | sed 's/^/::debug::/g' || true
+            exit 1
+          fi
 
       - name: Build app + zh-cn i18n
         run: |
