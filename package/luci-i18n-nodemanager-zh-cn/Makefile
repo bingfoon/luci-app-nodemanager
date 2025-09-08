@@ -21,7 +21,7 @@ endef
 
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
-	# 1) 选择 po 目录
+	# 找 po 目录（支持 zh_Hans 与 zh-cn）
 	if [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans" ]; then \
 		PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans"; \
 	elif [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn" ]; then \
@@ -29,17 +29,17 @@ define Package/$(PKG_NAME)/install
 	else \
 		echo "No po dir under luci-app-$(LUCI_PKG_NAME)"; exit 1; \
 	fi; \
-	# 2) 取 nodemanager.po
+	# 取 nodemanager.po（若你文件名不同，这里改掉）
 	POFILE="$$PDIR/$(LUCI_PKG_NAME).po"; \
 	[ -f "$$POFILE" ] || { echo "Missing $$POFILE"; exit 1; }; \
-	# 3) 定位 po2lmo（hostpkg 优先，其次 luci 源码）
+	# 定位 po2lmo（hostpkg 优先，其次 luci 源码）
 	PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
 	if [ ! -x "$$PO2LMO" ]; then \
 		$$(MAKE) -C "$(TOPDIR)/feeds/luci/modules/luci-base/src" po2lmo; \
 		PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
 	fi; \
 	[ -x "$$PO2LMO" ] || { echo "po2lmo not available"; exit 1; }; \
-	# 4) 生成 .lmo
+	# 生成 .lmo
 	"$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo"
 endef
 

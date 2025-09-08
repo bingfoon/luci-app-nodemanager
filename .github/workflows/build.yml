@@ -90,6 +90,67 @@ jobs:
           rm -rf "$SDK_DIR/package/luci-app-nodemanager"
           ln -s "$GITHUB_WORKSPACE" "$SDK_DIR/package/luci-app-nodemanager"
 
+      - name: Create zh-cn i18n Makefile (with TAB placeholders)
+        run: |
+          set -euo pipefail
+          mkdir -p "$SDK_DIR/package/luci-i18n-nodemanager-zh-cn"
+          cat > "$SDK_DIR/package/luci-i18n-nodemanager-zh-cn/Makefile" <<'MAKEEOF'
+          include $(TOPDIR)/rules.mk
+
+          LUCI_PKG_NAME:=nodemanager
+          PKG_NAME:=luci-i18n-$(LUCI_PKG_NAME)-zh-cn
+          PKG_RELEASE:=1
+
+          include $(INCLUDE_DIR)/package.mk
+
+          define Package/$(PKG_NAME)
+            SECTION:=luci
+            CATEGORY:=LuCI
+            SUBMENU:=3. Applications
+            TITLE:=Chinese (zh-cn) translation for luci-app-$(LUCI_PKG_NAME)
+            DEPENDS:=+luci-app-$(LUCI_PKG_NAME)
+            PKGARCH:=all
+          endef
+
+          define Build/Compile
+          @@TAB@@true
+          endef
+
+          define Package/$(PKG_NAME)/install
+          @@TAB@@$(INSTALL_DIR) $(1)/usr/share/luci/i18n
+          @@TAB@@if [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans" ]; then \
+          @@TAB@@  PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans"; \
+          @@TAB@@elif [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn" ]; then \
+          @@TAB@@  PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn"; \
+          @@TAB@@else \
+          @@TAB@@  echo "No po dir under luci-app-$(LUCI_PKG_NAME)"; exit 1; \
+          @@TAB@@fi; \
+          @@TAB@@POFILE="$$PDIR/$(LUCI_PKG_NAME).po"; \
+          @@TAB@@[ -f "$$POFILE" ] || { echo "Missing $$POFILE"; exit 1; }; \
+          @@TAB@@PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
+          @@TAB@@if [ ! -x "$$PO2LMO" ]; then \
+          @@TAB@@  $$(MAKE) -C "$(TOPDIR)/feeds/luci/modules/luci-base/src" po2lmo; \
+          @@TAB@@  PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
+          @@TAB@@fi; \
+          @@TAB@@[ -x "$$PO2LMO" ] || { echo "po2lmo not available"; exit 1; }; \
+          @@TAB@@"$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo"
+          endef
+
+          $(eval $(call BuildPackage,$(PKG_NAME)))
+          MAKEEOF
+          # 把 @@TAB@@ 替换成真正 TAB（开头位置）
+          sed -i 's/^@@TAB@@/\t/' "$SDK_DIR/package/luci-i18n-nodemanager-zh-cn/Makefile"
+
+      - name: Build zh-cn i18n
+        run: |
+          set -euo pipefail
+          # 准备 po2lmo（若 hostpkg 没有，就在 luci 源码里现编）
+          "$SDK_DIR/scripts/feeds" update luci
+          "$SDK_DIR/scripts/feeds" install luci-base
+          make -C "$SDK_DIR/feeds/luci/modules/luci-base/src" po2lmo
+          # 编译 i18n 包
+          make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-i18n-nodemanager-zh-cn/compile
+
       - name: Seed .config (non-interactive; prevents menuconfig)
         shell: bash
         run: |
