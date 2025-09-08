@@ -86,7 +86,7 @@ jobs:
               install -Dm755 feeds/luci/modules/luci-base/src/po2lmo "$PWD/staging_dir/hostpkg/bin/po2lmo"
             fi
           fi
-          
+
       - name: Create i18n package Makefile
         run: |
           mkdir -p package/luci-i18n-nodemanager-zh-cn
@@ -185,7 +185,7 @@ jobs:
           # 先编主包（若已编过可省略）
           make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
           # 再编我们刚写入的 i18n 子包目录
-          make -j"$(nproc)" V=s package/luci-i18n-nodemanager-zh-cn/compile
+          make -j$(nproc) V=s package/luci-app-nodemanager/compile package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect artifacts
         if: always()
