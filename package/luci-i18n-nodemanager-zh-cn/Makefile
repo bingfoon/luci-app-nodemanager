@@ -6,41 +6,43 @@ PKG_RELEASE:=1
 
 include $(INCLUDE_DIR)/package.mk
 
+# 纯数据包：给它一个构建目录，避免默认规则报错
+PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
+
 define Package/$(PKG_NAME)
-  SECTION:=luci
-  CATEGORY:=LuCI
-  SUBMENU:=3. Applications
-  TITLE:=Chinese (zh-cn) translation for luci-app-$(LUCI_PKG_NAME)
-  DEPENDS:=+luci-app-$(LUCI_PKG_NAME)
-  PKGARCH:=all
+	SECTION:=luci
+	CATEGORY:=LuCI
+	SUBMENU:=3. Applications
+	TITLE:=Chinese (zh-cn) translation for luci-app-$(LUCI_PKG_NAME)
+	DEPENDS:=+luci-app-$(LUCI_PKG_NAME)
+	PKGARCH:=all
 endef
 
+# 优先 nodemanager.po；没有就取第一个 *.po
+POFILE := \
+  $(firstword \
+    $(wildcard $(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans/$(LUCI_PKG_NAME).po) \
+    $(wildcard $(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn/$(LUCI_PKG_NAME).po) \
+    $(wildcard $(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans/*.po) \
+    $(wildcard $(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn/*.po) \
+  )
+$(if $(POFILE),,$(error No .po found under package/luci-app-$(LUCI_PKG_NAME)/po/{zh_Hans,zh-cn}))
+
+# —— 关键：把 Build 阶段设为 no-op —— 
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+endef
+define Build/Configure
+endef
 define Build/Compile
-	@true
+	true
 endef
 
+# 安装阶段用 host 的 po2lmo 生成 .lmo
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
-	# 找 po 目录（支持 zh_Hans 与 zh-cn）
-	if [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans" ]; then \
-		PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans"; \
-	elif [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn" ]; then \
-		PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn"; \
-	else \
-		echo "No po dir under luci-app-$(LUCI_PKG_NAME)"; exit 1; \
-	fi; \
-	# 取 nodemanager.po（若你文件名不同，这里改掉）
-	POFILE="$$PDIR/$(LUCI_PKG_NAME).po"; \
-	[ -f "$$POFILE" ] || { echo "Missing $$POFILE"; exit 1; }; \
-	# 定位 po2lmo（hostpkg 优先，其次 luci 源码）
-	PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
-	if [ ! -x "$$PO2LMO" ]; then \
-		$$(MAKE) -C "$(TOPDIR)/feeds/luci/modules/luci-base/src" po2lmo; \
-		PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
-	fi; \
-	[ -x "$$PO2LMO" ] || { echo "po2lmo not available"; exit 1; }; \
-	# 生成 .lmo
-	"$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo"
+	$(STAGING_DIR_HOSTPKG)/bin/po2lmo "$(POFILE)" \
+		"$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo"
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
