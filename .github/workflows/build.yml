@@ -25,17 +25,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gawk unzip zstd rsync file curl
 
-      - name: Download & extract SDK (to RUNNER_TEMP, avoid recursion)
+      - name: Download & extract SDK
         run: |
           set -euo pipefail
           curl -fL -o sdk.tar.zst "${{ matrix.target.sdk }}"
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
-          SDK_BASE="$(tar -I zstd -tf sdk.tar.zst | head -1 | cut -d/ -f1)"
-          SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
-          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
+          # 从已解压目录里找顶层 SDK 目录，避免对 tar 做 head 触发 broken pipe
+          SDK_DIR="$(find "$RUNNER_TEMP/sdk" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          SDK_BASE="$(basename "$SDK_DIR")"
+          echo "SDK_DIR=$SDK_DIR"   >> "$GITHUB_ENV"
           echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
-          ln -s "$SDK_DIR" sdk
+          ln -sfn "$SDK_DIR" sdk
 
       - name: Setup feeds (luci only)
         run: |
