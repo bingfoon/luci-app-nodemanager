@@ -70,6 +70,22 @@ jobs:
           cd "$SDK_DIR"
           rm -rf "package/$PACKAGE_NAME"
           ln -s "$GITHUB_WORKSPACE" "package/$PACKAGE_NAME"
+          cp -r "$GITHUB_WORKSPACE/package/luci-i18n-nodemanager-zh-cn" "$SDK_DIR/package/"
+
+      - name: Prepare po2lmo (fallback)
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          # 尝试把 luci feed 拉好（若已存在不会出错）
+          ./scripts/feeds update luci || true
+          ./scripts/feeds install luci-base || true
+          # 如果 hostpkg 里没有 po2lmo，就地编译一个
+          if [ ! -x "$PWD/staging_dir/hostpkg/bin/po2lmo" ]; then
+            if [ -d "feeds/luci/modules/luci-base/src" ]; then
+              make -C feeds/luci/modules/luci-base/src po2lmo
+              install -Dm755 feeds/luci/modules/luci-base/src/po2lmo "$PWD/staging_dir/hostpkg/bin/po2lmo"
+            fi
+          fi
 
       - name: Create zh-cn i18n package (real dir)
         run: |
@@ -116,13 +132,6 @@ jobs:
           EOF
 
       - name: Build package
-        run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          make -j"$(nproc)" V=s package/$PACKAGE_NAME/compile
-
-      - name: Build zh-cn i18n package
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
