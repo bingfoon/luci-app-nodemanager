@@ -115,7 +115,7 @@ jobs:
       - name: Build zh-cn i18n
         shell: bash
         run: |
-          set -euo pipepipefail
+          set -euo pipefail
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Upload artifacts
