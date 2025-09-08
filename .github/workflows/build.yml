@@ -99,25 +99,31 @@ jobs:
             cp "$SDK_DIR/config.seed" "$SDK_DIR/.config"
           fi
           make -C "$SDK_DIR" defconfig
-
-      - name: Build po2lmo locally
+      - name: Expose i18n pkg to SDK
         shell: bash
         run: |
           set -euo pipefail
+          # 你的仓库里应有: package/luci-i18n-nodemanager-zh-cn/Makefile
+          test -f "$GITHUB_WORKSPACE/package/luci-i18n-nodemanager-zh-cn/Makefile"
+          ln -sfn "$GITHUB_WORKSPACE/package/luci-i18n-nodemanager-zh-cn" \
+                  "$SDK_DIR/package/luci-i18n-nodemanager-zh-cn"
+      - name: Build po2lmo (from luci-base)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SDK_DIR/scripts/feeds" update luci
+          "$SDK_DIR/scripts/feeds" install luci-base
           make -C "$SDK_DIR/feeds/luci/modules/luci-base/src" po2lmo
-
       - name: Build luci-app-nodemanager
         shell: bash
         run: |
           set -euo pipefail
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/compile
-
       - name: Build zh-cn i18n
         shell: bash
         run: |
           set -euo pipefail
-          make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
-
+          make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-i18n-nodemanager-zh-cn/compile
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
