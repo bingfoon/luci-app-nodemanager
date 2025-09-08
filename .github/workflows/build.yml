@@ -10,6 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      TERM: xterm
+      DEBIAN_FRONTEND: noninteractive
       PACKAGE_NAME: luci-app-nodemanager
       OWRT_VER: 24.10.2
       OWRT_TARGET: x86
@@ -31,7 +33,7 @@ jobs:
           set -euo pipefail
           curl -fL --retry 5 -o "$SDK_FILE" "$SDK_URL"
           mkdir -p "$RUNNER_TEMP/sdk"
-          # 避免 head 提前关管道导致 tar "write error"
+          # 先列出归档的第一层目录名，再解包，避免管道写错误
           tar -I zstd -tf "$SDK_FILE" > "$RUNNER_TEMP/sdk/list.txt"
           SDK_BASE="$(head -n1 "$RUNNER_TEMP/sdk/list.txt" | cut -d/ -f1)"
           tar -I zstd -xf "$SDK_FILE" -C "$RUNNER_TEMP/sdk"
@@ -46,6 +48,13 @@ jobs:
           cd "$SDK_DIR"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+      - name: Prepare .config (non-interactive)
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          # 生成默认配置，避免触发 menuconfig（TUI）
+          make defconfig
 
       - name: Add package into SDK
         run: |
