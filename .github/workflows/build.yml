@@ -71,6 +71,50 @@ jobs:
           rm -rf "package/$PACKAGE_NAME"
           ln -s "$GITHUB_WORKSPACE" "package/$PACKAGE_NAME"
 
+      - name: Create zh-cn i18n package (real dir)
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          mkdir -p package/luci-i18n-nodemanager-zh-cn
+          cat > package/luci-i18n-nodemanager-zh-cn/Makefile <<'EOF'
+          include $(TOPDIR)/rules.mk
+
+          PKG_NAME:=luci-i18n-nodemanager-zh-cn
+          PKG_RELEASE:=1
+          PKG_BUILD_DEPENDS:=luci-base/host  # 确保有 po2lmo
+
+          include $(INCLUDE_DIR)/package.mk
+
+          define Package/$(PKG_NAME)
+            SECTION:=luci
+            CATEGORY:=LuCI
+            SUBMENU:=3. Applications
+            TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
+            PKGARCH:=all
+            DEPENDS:=+luci-app-nodemanager
+          endef
+
+          define Build/Compile
+          endef
+
+          define Package/$(PKG_NAME)/install
+          	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
+          	if [ -d "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" ]; then \
+          		PDIR="$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans"; \
+          	elif [ -d "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn" ]; then \
+          		PDIR="$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; \
+          	else \
+          		echo "ERROR: no po dir: po/zh_Hans or po/zh-cn" >&2; exit 1; \
+          	fi; \
+          	POFILE="$$(ls "$$PDIR"/*.po | head -n1)"; \
+          	if [ -z "$$POFILE" ]; then echo "ERROR: no .po file found in $$PDIR" >&2; exit 1; fi; \
+          	DOMAIN="$$(basename "$$POFILE" .po)"; \
+          	$(STAGING_DIR_HOSTPKG)/bin/po2lmo "$$POFILE" "$(1)/usr/share/luci/i18n/$$DOMAIN.zh-cn.lmo"
+          endef
+
+          $(eval $(call BuildPackage,$(PKG_NAME)))
+          EOF
+
       - name: Build package
         run: |
           set -euo pipefail
@@ -78,25 +122,15 @@ jobs:
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           make -j"$(nproc)" V=s package/$PACKAGE_NAME/compile
 
-      - name: Build i18n subpackages (best effort)
+      - name: Build zh-cn i18n package
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
-          lang_suffix() {
-            case "$1" in
-              zh_Hans|zh-cn) echo zh-cn ;;
-              zh_Hant|zh-tw) echo zh-tw ;;
-              *) echo "$1" ;;
-            esac
-          }
-          if [ -d "$GITHUB_WORKSPACE/po" ]; then
-            for d in "$GITHUB_WORKSPACE"/po/*; do
-              [ -d "$d" ] || continue
-              base="$(basename "$d")"
-              code="$(lang_suffix "$base")"
-              make -j"$(nproc)" V=s package/luci-i18n-nodemanager-"$code"/compile || true
-            done
-          fi
+          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          # 先编主包（若已编过可省略）
+          make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
+          # 再编我们刚写入的 i18n 子包目录
+          make -j"$(nproc)" V=s package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect artifacts
         if: always()
