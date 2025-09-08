@@ -30,16 +30,17 @@ define Package/$(PKG_NAME)/install
 	else \
 		echo "No po dir under luci-app-$(LUCI_PKG_NAME)"; exit 1; \
 	fi; \
+	# 2) 固定使用 nodemanager.po
 	POFILE="$$PDIR/$(DOMAIN).po"; \
 	[ -f "$$POFILE" ] || { echo "Missing $$POFILE"; exit 1; }; \
-	# 2) 定位 po2lmo（hostpkg 优先，fallback 到 luci 源码）
+	# 3) 定位 po2lmo（hostpkg 优先，fallback 到 luci 源码）
 	PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
 	if [ ! -x "$$PO2LMO" ]; then \
 		$$(MAKE) -C "$(TOPDIR)/feeds/luci/modules/luci-base/src" po2lmo; \
 		PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
 	fi; \
 	[ -x "$$PO2LMO" ] || { echo "po2lmo not available"; exit 1; }; \
-	# 3) 生成 .lmo
+	# 4) 生成 .lmo
 	"$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$(DOMAIN).zh-cn.lmo"
 endef
 
