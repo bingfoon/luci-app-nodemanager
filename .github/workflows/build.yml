@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
       SDK_URL: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
       SDK_DIR: /home/runner/work/_temp/sdk
@@ -20,8 +20,9 @@ jobs:
 
       - name: Install prerequisites
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential zstd libncurses5 rsync gawk gettext unzip curl
+          sudo apt-get install -y build-essential zstd rsync gawk gettext unzip curl python3
 
       - name: Download & extract OpenWrt SDK
         run: |
@@ -30,8 +31,7 @@ jobs:
           cd /home/runner/work/_temp
           curl -L --retry 3 -o sdk.tar.zst "$SDK_URL"
           tar --zstd -xf sdk.tar.zst
-          realdir="$(ls -d openwrt-sdk-*/ | head -n1)"
-          mv "$realdir" "$SDK_DIR"
+          mv openwrt-sdk-* "$SDK_DIR"
           ls -la "$SDK_DIR"
 
       - name: Prepare feeds & defconfig
@@ -53,72 +53,68 @@ jobs:
           set -euo pipefail
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/compile
 
-      - name: Create zh-cn i18n Makefile
+      - name: Create zh-cn i18n Makefile (tabs preserved via Python)
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          from textwrap import dedent
           import os, pathlib
           sdk = os.environ['SDK_DIR']
           d = pathlib.Path(sdk) / 'package' / 'luci-i18n-nodemanager-zh-cn'
           d.mkdir(parents=True, exist_ok=True)
-          content = dedent('''\
-          include $(TOPDIR)/rules.mk
-
-          LUCI_PKG_NAME:=nodemanager
-          PKG_NAME:=luci-i18n-$(LUCI_PKG_NAME)-zh-cn
-          PKG_RELEASE:=1
-
-          include $(INCLUDE_DIR)/package.mk
-
-          define Package/$(PKG_NAME)
-            SECTION:=luci
-            CATEGORY:=LuCI
-            SUBMENU:=3. Applications
-            TITLE:=Chinese (zh-cn) translation for luci-app-$(LUCI_PKG_NAME)
-            DEPENDS:=+luci-app-$(LUCI_PKG_NAME)
-            PKGARCH:=all
-          endef
-
-          define Build/Compile
-          	true
-          endef
-
-          define Package/$(PKG_NAME)/install
-          	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
-          	if [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans" ]; then \
-          	  PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans"; \
-          	elif [ -d "$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn" ]; then \
-          	  PDIR="$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn"; \
-          	else \
-          	  echo "No po dir under luci-app-$(LUCI_PKG_NAME)"; exit 1; \
-          	fi; \
-          	# Prefer nodemanager.po; otherwise pick the first .po
-          	if [ -f "$$PDIR/$(LUCI_PKG_NAME).po" ]; then \
-          	  POFILE="$$PDIR/$(LUCI_PKG_NAME).po"; \
-          	else \
-          	  POFILE=$$(ls -1 "$$PDIR"/*.po 2>/dev/null | head -n1); \
-          	fi; \
-          	[ -n "$$POFILE" ] || { echo "No .po file in $$PDIR"; exit 1; }; \
-          	PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
-          	if [ ! -x "$$PO2LMO" ]; then \
-          	  $$(MAKE) -C "$(TOPDIR)/feeds/luci/modules/luci-base/src" po2lmo; \
-          	  PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
-          	fi; \
-          	[ -x "$$PO2LMO" ] || { echo "po2lmo not available"; exit 1; }; \
-          	"$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo"
-          endef
-
-          $(eval $(call BuildPackage,$(PKG_NAME)))
-          ''')
-          (d/'Makefile').write_text(content)
+          content = "\n".join([
+            "include $(TOPDIR)/rules.mk",
+            "",
+            "LUCI_PKG_NAME:=nodemanager",
+            "PKG_NAME:=luci-i18n-$(LUCI_PKG_NAME)-zh-cn",
+            "PKG_RELEASE:=1",
+            "",
+            "include $(INCLUDE_DIR)/package.mk",
+            "",
+            "define Package/$(PKG_NAME)",
+            "\tSECTION:=luci",
+            "\tCATEGORY:=LuCI",
+            "\tSUBMENU:=3. Applications",
+            "\tTITLE:=Chinese (zh-cn) translation for luci-app-$(LUCI_PKG_NAME)",
+            "\tDEPENDS:=+luci-app-$(LUCI_PKG_NAME)",
+            "\tPKGARCH:=all",
+            "endef",
+            "",
+            "# Build a local po2lmo with HOSTCC to avoid hostpkg dependency",
+            "define Build/Compile",
+            "\t$(HOSTCC) -O2 -Wall \\",
+            "\t\t-o $(PKG_BUILD_DIR)/po2lmo \\",
+            "\t\t$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo.c \\",
+            "\t\t$(TOPDIR)/feeds/luci/modules/luci-base/src/lmo_*.c",
+            "endef",
+            "",
+            "define Package/$(PKG_NAME)/install",
+            "\t$(INSTALL_DIR) $(1)/usr/share/luci/i18n",
+            "\t@if [ -d \"$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans\" ]; then \\",
+            "\t\tPDIR=\"$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh_Hans\"; \\",
+            "\telif [ -d \"$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn\" ]; then \\",
+            "\t\tPDIR=\"$(TOPDIR)/package/luci-app-$(LUCI_PKG_NAME)/po/zh-cn\"; \\",
+            "\telse \\",
+            "\t\techo \"No po dir under luci-app-$(LUCI_PKG_NAME)\"; exit 1; \\",
+            "\tfi; \\",
+            "\tif [ -f \"$$PDIR/$(LUCI_PKG_NAME).po\" ]; then \\",
+            "\t\tPOFILE=\"$$PDIR/$(LUCI_PKG_NAME).po\"; \\",
+            "\telse \\",
+            "\t\tPOFILE=\"$$(ls -1 \"$$PDIR\"/*.po 2>/dev/null | head -n1)\"; \\",
+            "\tfi; \\",
+            "\t[ -n \"$$POFILE\" ] || { echo \"No .po file in $$PDIR\"; exit 1; }; \\",
+            "\t\"$(PKG_BUILD_DIR)/po2lmo\" \"$$POFILE\" \"$(1)/usr/share/luci/i18n/$(LUCI_PKG_NAME).zh-cn.lmo\"",
+            "endef",
+            "",
+            "$(eval $(call BuildPackage,$(PKG_NAME)))",
+            ""
+          ])
+          (d / 'Makefile').write_text(content)
           print("Wrote", d/'Makefile')
           PY
 
       - name: Build zh-cn i18n
         run: |
           set -euo pipefail
-          make -C "$SDK_DIR/feeds/luci/modules/luci-base/src" po2lmo
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Collect IPKs
