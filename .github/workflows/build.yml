@@ -25,7 +25,8 @@ jobs:
       - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zstd rsync
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git python3 cmake ninja-build zstd rsync
 
       - name: Download & unpack OpenWrt SDK
         shell: bash
@@ -36,7 +37,7 @@ jobs:
           curl -fL -o sdk.tar.zst "${SDK_URL}"
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
-          # 避免 tar|head 在 pipefail 下触发 SIGPIPE
+          # 避免 pipe SIGPIPE
           tar -I zstd -tf sdk.tar.zst > /tmp/sdk.list
           SDK_BASE="$(head -1 /tmp/sdk.list | cut -d/ -f1)"
           SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
@@ -44,15 +45,14 @@ jobs:
           echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Sync single-package repo into SDK/package/
+      - name: Sync repo into SDK/package/
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$SDK_DIR/package/${PACKAGE_NAME}"
-          # 把当前仓库全部同步到 SDK 的 package/<pkg>/ 下（排除 CI 文件夹）
           rsync -a --delete --exclude '.git' --exclude '.github' ./ "$SDK_DIR/package/${PACKAGE_NAME}/"
 
-      - name: Prepare feeds & minimal .config
+      - name: Update & install feeds
         shell: bash
         run: |
           set -euo pipefail
@@ -60,37 +60,40 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # 只构建我们这个包；禁掉会引来 lua.h / ucode 相关编译错误的包
+      - name: Build po2lmo/jsmin (host tools) directly
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR/feeds/luci/modules/luci-base/src"
+          make -j"$(nproc)" po2lmo jsmin
+          install -d "$SDK_DIR/staging_dir/hostpkg/bin"
+          install -m0755 po2lmo "$SDK_DIR/staging_dir/hostpkg/bin/po2lmo"
+          install -m0755 jsmin  "$SDK_DIR/staging_dir/hostpkg/bin/jsmin"
+
+      - name: Prepare minimal .config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
           rm -f .config
           {
             echo "CONFIG_TARGET_${TARGET}=y"
             echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y"
             echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
-            # 显式关闭这些可选组件，避免把 liblua / ucode-mod-* / rpcd-mod-luci 等拉进来
-            echo "CONFIG_PACKAGE_liblucihttp-lua=n"
-            echo "CONFIG_PACKAGE_ucode-mod-lua=n"
-            echo "CONFIG_PACKAGE_ucode-mod-html=n"
-            echo "CONFIG_PACKAGE_rpcd-mod-luci=n"
           } > .config
           make defconfig
 
-      - name: Build host tools (po2lmo)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          # luci-base 的 host-compile 会把 po2lmo/jsmin 装到 hostpkg/bin
-          make -j"$(nproc)" V=s package/feeds/luci/luci-base/host-compile
-
       - name: Build ${{ env.PACKAGE_NAME }}
         shell: bash
+        env:
+          LUCI_MINIFY: "0"  # 关闭 LuCI 压缩，避免 luasrcdiet/host 依赖
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="$PWD/staging_dir/hostpkg/bin/po2lmo"
-          make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
+          # 串行编译，避免依赖次序导致的头文件缺失
+          make -j1 V=s package/${PACKAGE_NAME}/compile
 
       - name: Collect .ipk artifacts
         if: always()
