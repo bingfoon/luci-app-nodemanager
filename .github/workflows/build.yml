@@ -9,6 +9,7 @@ jobs:
     env:
       SDK_URL: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
       SDK_DIR: /home/runner/work/_temp/sdk
+      TERM: dumb
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,60 +18,58 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MKDIR="package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn"
-          mkdir -p "$MKDIR"
-          {
-            echo 'include $(TOPDIR)/rules.mk'
-            echo ''
-            echo 'PKG_NAME:=luci-i18n-nodemanager-zh-cn'
-            echo 'PKG_RELEASE:=1'
-            echo ''
-            echo 'include $(INCLUDE_DIR)/package.mk'
-            echo ''
-            echo '# 优先用 hostpkg 的 po2lmo，不存在就用 luci 源码目录里的二进制'
-            echo 'PO2LMO:=$(if $(wildcard $(STAGING_DIR_HOSTPKG)/bin/po2lmo),$(STAGING_DIR_HOSTPKG)/bin/po2lmo,$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo)'
-            echo ''
-            echo 'define Package/$(PKG_NAME)'
-            echo '  SECTION:=luci'
-            echo '  CATEGORY:=LuCI'
-            echo '  SUBMENU:=3. Applications'
-            echo '  TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager'
-            echo '  PKGARCH:=all'
-            echo '  DEPENDS:=+luci-app-nodemanager'
-            echo 'endef'
-            echo ''
-            echo '# 确保本地 po2lmo 已构建（不会触发 menuconfig）'
-            echo 'define Build/Compile'
-            echo '  $$(MAKE) -C $(TOPDIR)/feeds/luci/modules/luci-base/src po2lmo'
-            echo 'endef'
-            echo ''
-            echo 'define Package/$(PKG_NAME)/install'
-            echo '@TAB@$(INSTALL_DIR) $(1)/usr/share/luci/i18n'
-            echo '@TAB@set -e; \'
-            echo '@TAB@PDIR=""; \'
-            echo '@TAB@for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \'
-            echo '@TAB@  if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \'
-            echo '@TAB@done; \'
-            echo '@TAB@[ -n "$$PDIR" ] || { echo "ERROR: no po dir (po/zh_Hans or po/zh-cn) under luci-app-nodemanager" >&2; exit 1; }; \'
-            echo '@TAB@ok=0; \'
-            echo '@TAB@for p in "$$PDIR"/*.po; do \'
-            echo '@TAB@  [ -f "$$p" ] || continue; \'
-            echo '@TAB@  ok=1; \'
-            echo '@TAB@  b=$$(basename "$$p" .po); \'
-            echo '@TAB@  $(PO2LMO) "$$p" "$(1)/usr/share/luci/i18n/$$b.zh-cn.lmo"; \'
-            echo '@TAB@done; \'
-            echo '@TAB@[ "$$ok" -eq 1 ] || { echo "ERROR: no .po files in $$PDIR" >&2; exit 1; }'
-            echo 'endef'
-            echo ''
-            echo '$(eval $(call BuildPackage,$(PKG_NAME)))'
-          } > "$MKDIR/Makefile"
-          # 把 @TAB@ 替换为真实 Tab，避免 "missing separator"
-          perl -0777 -pe 's/^@TAB@/\t/mg' -i "$MKDIR/Makefile"
+          PKG_DIR=package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn
+          mkdir -p "$PKG_DIR"
+          cat > "$PKG_DIR/Makefile" <<'EOF'
+          include $(TOPDIR)/rules.mk
+
+          PKG_NAME:=luci-i18n-nodemanager-zh-cn
+          PKG_RELEASE:=1
+
+          include $(INCLUDE_DIR)/package.mk
+
+          # 优先用 hostpkg 的 po2lmo，不存在就用 luci 源码目录里的二进制
+          PO2LMO:=$(if $(wildcard $(STAGING_DIR_HOSTPKG)/bin/po2lmo),$(STAGING_DIR_HOSTPKG)/bin/po2lmo,$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo)
+
+          define Package/$(PKG_NAME)
+            SECTION:=luci
+            CATEGORY:=LuCI
+            SUBMENU:=3. Applications
+            TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
+            PKGARCH:=all
+            DEPENDS:=+luci-app-nodemanager
+          endef
+
+          # 只构建 po2lmo，不会触发 menuconfig
+          define Build/Compile
+          	$$(MAKE) -C $(TOPDIR)/feeds/luci/modules/luci-base/src po2lmo
+          endef
+
+          define Package/$(PKG_NAME)/install
+          	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
+          	set -e; \
+          	PDIR=""; \
+          	for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \
+          	  if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \
+          	done; \
+          	[ -n "$$PDIR" ] || { echo "ERROR: no po dir under luci-app-nodemanager (po/zh_Hans or po/zh-cn)"; exit 1; }; \
+          	ok=0; \
+          	for p in "$$PDIR"/*.po; do \
+          	  [ -f "$$p" ] || continue; \
+          	  ok=1; \
+          	  b=$$(basename "$$p" .po); \
+          	  $(PO2LMO) "$$p" "$(1)/usr/share/luci/i18n/$$b.zh-cn.lmo"; \
+          	done; \
+          	[ "$$ok" -eq 1 ] || { echo "ERROR: no .po files in $$PDIR"; exit 1; }
+          endef
+
+          $(eval $(call BuildPackage,$(PKG_NAME)))
+          EOF
 
       - name: Download & extract OpenWrt SDK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p "$SDK_DIR"
           curl -L "$SDK_URL" -o sdk.tar.zst
           tar --zstd -xf sdk.tar.zst --strip-components=1 -C "$SDK_DIR"
@@ -78,7 +77,7 @@ jobs:
       - name: Prepare feeds
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           pushd "$SDK_DIR"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -87,26 +86,36 @@ jobs:
       - name: Link your package into SDK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           rm -rf "$SDK_DIR/package/luci-app-nodemanager"
           ln -s "$GITHUB_WORKSPACE" "$SDK_DIR/package/luci-app-nodemanager"
 
-      - name: Build po2lmo (local, non-interactive)
+      - name: Seed .config (non-interactive; prevents menuconfig)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          # 用 SDK 自带的 config.seed 生成 .config，然后 defconfig 收敛
+          if [ -f "$SDK_DIR/config.seed" ]; then
+            cp "$SDK_DIR/config.seed" "$SDK_DIR/.config"
+          fi
+          make -C "$SDK_DIR" defconfig
+
+      - name: Build po2lmo locally
+        shell: bash
+        run: |
+          set -euo pipefail
           make -C "$SDK_DIR/feeds/luci/modules/luci-base/src" po2lmo
 
       - name: Build luci-app-nodemanager
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/compile
 
       - name: Build zh-cn i18n
         shell: bash
         run: |
-          set -e
+          set -euo pipepipefail
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Upload artifacts
