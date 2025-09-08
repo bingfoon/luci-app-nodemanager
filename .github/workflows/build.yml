@@ -1,210 +1,120 @@
-name: Build (OpenWrt SDK 24.10.2 x86_64)
+name: build-ipk
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      TERM: xterm
-      DEBIAN_FRONTEND: noninteractive
-      PACKAGE_NAME: luci-app-nodemanager
-      OWRT_VER: 24.10.2
-      OWRT_TARGET: x86
-      OWRT_SUBTARGET: 64
-      SDK_FILE: openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
       SDK_URL: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-
+      SDK_DIR: /home/runner/work/_temp/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install host deps
+      - name: Prepare zh-cn i18n Makefile (inside repo)
+        shell: bash
         run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build python3 curl git zstd
+          set -e
+          MKDIR="package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn"
+          mkdir -p "$MKDIR"
 
-      - name: Download OpenWrt SDK
-        run: |
-          set -euo pipefail
-          curl -fL --retry 5 -o "$SDK_FILE" "$SDK_URL"
-          mkdir -p "$RUNNER_TEMP/sdk"
-          tar -I zstd -xf "$SDK_FILE" -C "$RUNNER_TEMP/sdk"
-          # 直接用文件名推导展开出的顶层目录名；如不匹配再兜底 find
-          SDK_BASE="${SDK_FILE%.tar.zst}"
-          SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
-          if [ ! -d "$SDK_DIR" ]; then
-            SDK_DIR="$(find "$RUNNER_TEMP/sdk" -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
-            SDK_BASE="$(basename "$SDK_DIR")"
-          fi
-          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
-          echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
-          ln -s "$SDK_DIR" sdk
+          cat > "$MKDIR/Makefile" <<'EOF'
+include $(TOPDIR)/rules.mk
 
-      - name: Setup feeds
+PKG_NAME:=luci-i18n-nodemanager-zh-cn
+PKG_RELEASE:=1
+
+PKG_BUILD_DEPENDS:=luci-base/host
+
+include $(INCLUDE_DIR)/package.mk
+
+PO2LMO:=$(STAGING_DIR_HOSTPKG)/bin/po2lmo
+
+define Package/$(PKG_NAME)
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
+  PKGARCH:=all
+  DEPENDS:=+luci-app-nodemanager
+endef
+
+define Build/Compile
+endef
+
+define Package/$(PKG_NAME)/install
+@TAB@$(INSTALL_DIR) $(1)/usr/share/luci/i18n
+@TAB@set -e; \
+@TAB@PDIR=""; \
+@TAB@for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \
+@TAB@  if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \
+@TAB@done; \
+@TAB@[ -n "$$PDIR" ] || { echo "ERROR: no po dir (po/zh_Hans or po/zh-cn) under luci-app-nodemanager" >&2; exit 1; }; \
+@TAB@ok=0; \
+@TAB@for p in "$$PDIR"/*.po; do \
+@TAB@  [ -f "$$p" ] || continue; \
+@TAB@  ok=1; \
+@TAB@  b=$$(basename "$$p" .po); \
+@TAB@  $(PO2LMO) "$$p" "$(1)/usr/share/luci/i18n/$$b.zh-cn.lmo"; \
+@TAB@done; \
+@TAB@[ "$$ok" -eq 1 ] || { echo "ERROR: no .po files in $$PDIR" >&2; exit 1; }
+endef
+
+$(eval $(call BuildPackage,$(PKG_NAME)))
+EOF
+
+          # 把行首 @TAB@ 替换为真实 Tab（至关重要，避免 missing separator）
+          perl -0777 -pe 's/^@TAB@/\t/mg' -i "$MKDIR/Makefile"
+
+      - name: Download & extract OpenWrt SDK
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
+          set -e
+          mkdir -p "$SDK_DIR"
+          curl -L "$SDK_URL" -o sdk.tar.zst
+          tar --zstd -xf sdk.tar.zst --strip-components=1 -C "$SDK_DIR"
+
+      - name: Prepare feeds
+        shell: bash
+        run: |
+          set -e
+          pushd "$SDK_DIR"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          popd
 
-      - name: Prepare .config with LuCI zh-cn enabled (non-interactive)
+      - name: Link your package into SDK
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          make defconfig
-          {
-            echo 'CONFIG_LUCI_LANG_zh_Hans=y'
-            # 如也想要繁体：echo 'CONFIG_LUCI_LANG_zh_Hant=y'
-          } >> .config
-          make defconfig
+          set -e
+          rm -rf "$SDK_DIR/package/luci-app-nodemanager"
+          ln -s "$GITHUB_WORKSPACE" "$SDK_DIR/package/luci-app-nodemanager"
 
-      - name: Add package into SDK
+      - name: Build po2lmo (host)
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          rm -rf "package/$PACKAGE_NAME"
-          ln -s "$GITHUB_WORKSPACE" "package/$PACKAGE_NAME"
-          cp -r "$GITHUB_WORKSPACE/package/luci-i18n-nodemanager-zh-cn" "$SDK_DIR/package/"
+          set -e
+          make -C "$SDK_DIR" package/feeds/luci/luci-base/host/compile V=s
 
-      - name: Prepare po2lmo (fallback)
+      - name: Build luci-app-nodemanager
+        shell: bash
         run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          # 尝试把 luci feed 拉好（若已存在不会出错）
-          ./scripts/feeds update luci || true
-          ./scripts/feeds install luci-base || true
-          # 如果 hostpkg 里没有 po2lmo，就地编译一个
-          if [ ! -x "$PWD/staging_dir/hostpkg/bin/po2lmo" ]; then
-            if [ -d "feeds/luci/modules/luci-base/src" ]; then
-              make -C feeds/luci/modules/luci-base/src po2lmo
-              install -Dm755 feeds/luci/modules/luci-base/src/po2lmo "$PWD/staging_dir/hostpkg/bin/po2lmo"
-            fi
-          fi
+          set -e
+          make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/compile
 
-      - name: Create i18n package Makefile
+      - name: Build zh-cn i18n
+        shell: bash
         run: |
-          mkdir -p package/luci-i18n-nodemanager-zh-cn
-          cat > package/luci-i18n-nodemanager-zh-cn/Makefile <<'EOF'
-          include $(TOPDIR)/rules.mk
-
-          PKG_NAME:=luci-i18n-nodemanager-zh-cn
-          PKG_RELEASE:=1
-          PKG_BUILD_DEPENDS:=luci-base/host
-
-          include $(INCLUDE_DIR)/package.mk
-
-          define Package/$(PKG_NAME)
-            SECTION:=luci
-            CATEGORY:=LuCI
-            SUBMENU:=3. Applications
-            TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
-            PKGARCH:=all
-            DEPENDS:=+luci-app-nodemanager
-          endef
-
-          define Build/Compile
-          endef
-
-          define Package/$(PKG_NAME)/install
-            $(INSTALL_DIR) $(1)/usr/share/luci/i18n
-            @set -e; \
-            for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \
-              if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \
-            done; \
-            [ -n "$$PDIR" ] || { echo "ERROR: no po dir: po/zh_Hans or po/zh-cn" >&2; exit 1; }; \
-            POFILE=$$(find "$$PDIR" -maxdepth 1 -type f -name '*.po' | head -n1); \
-            [ -n "$$POFILE" ] || { echo "ERROR: no .po file found in $$PDIR" >&2; exit 1; }; \
-            DOMAIN=$$(basename "$$POFILE" .po); \
-            PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
-            [ -x "$$PO2LMO" ] || PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
-            [ -x "$$PO2LMO" ] || { echo "ERROR: po2lmo not found"; exit 1; }; \
-            "$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$$DOMAIN.zh-cn.lmo"
-          endef
-
-          $(eval $(call BuildPackage,$(PKG_NAME)))
-          EOF
-
-          # 可选：验证文件里仍然有 "$$"
-          grep -n '\$\$' package/luci-i18n-nodemanager-zh-cn/Makefile || true
-
-      - name: Create zh-cn i18n package (real dir)
-        run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          mkdir -p package/luci-i18n-nodemanager-zh-cn
-          cat > package/luci-i18n-nodemanager-zh-cn/Makefile <<'EOF'
-          include $(TOPDIR)/rules.mk
-
-          PKG_NAME:=luci-i18n-nodemanager-zh-cn
-          PKG_RELEASE:=1
-          PKG_BUILD_DEPENDS:=luci-base/host  # 确保有 po2lmo
-
-          include $(INCLUDE_DIR)/package.mk
-
-          define Package/$(PKG_NAME)
-            SECTION:=luci
-            CATEGORY:=LuCI
-            SUBMENU:=3. Applications
-            TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
-            PKGARCH:=all
-            DEPENDS:=+luci-app-nodemanager
-          endef
-
-          define Build/Compile
-          endef
-
-          define Package/$(PKG_NAME)/install
-          	$(INSTALL_DIR) $(1)/usr/share/luci/i18n
-          	if [ -d "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" ]; then \
-          		PDIR="$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans"; \
-          	elif [ -d "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn" ]; then \
-          		PDIR="$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; \
-          	else \
-          		echo "ERROR: no po dir: po/zh_Hans or po/zh-cn" >&2; exit 1; \
-          	fi; \
-          	POFILE="$$(ls "$$PDIR"/*.po | head -n1)"; \
-          	if [ -z "$$POFILE" ]; then echo "ERROR: no .po file found in $$PDIR" >&2; exit 1; fi; \
-          	DOMAIN="$$(basename "$$POFILE" .po)"; \
-          	$(STAGING_DIR_HOSTPKG)/bin/po2lmo "$$POFILE" "$(1)/usr/share/luci/i18n/$$DOMAIN.zh-cn.lmo"
-          endef
-
-          $(eval $(call BuildPackage,$(PKG_NAME)))
-          EOF
-
-      - name: Build package
-        run: |
-          set -euo pipefail
-          cd "$SDK_DIR"
-          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          # 先编主包（若已编过可省略）
-          make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
-          # 再编我们刚写入的 i18n 子包目录
-          make -j$(nproc) V=s package/luci-app-nodemanager/compile package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
-
-      - name: Collect artifacts
-        if: always()
-        run: |
-          set -euo pipefail
-          OUT="$GITHUB_WORKSPACE/output"
-          mkdir -p "$OUT"
-          find "$SDK_DIR/bin" -type f \( \
-              -name 'luci-app-nodemanager_*.ipk' -o \
-              -name 'luci-i18n-nodemanager-*_*.ipk' \
-            \) -print -exec cp -v {} "$OUT"/ \; || true
-          echo "=== Tree of bin ==="
-          (cd "$SDK_DIR/bin" && find . -maxdepth 3 -type d -print | sort) || true
-          echo "=== Collected ==="
-          ls -l "$OUT" || true
+          set -e
+          # i18n 在你的仓库子目录下（通过上面的 symlink 出现在 SDK 里）
+          make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ env.OWRT_VER }}-${{ env.OWRT_TARGET }}-${{ env.OWRT_SUBTARGET }}
-          path: output/*.ipk
-          if-no-files-found: warn
+          name: ipk
+          path: |
+            ${{ env.SDK_DIR }}/bin/targets/*/*/packages/*luci-app-nodemanager_*.ipk
+            ${{ env.SDK_DIR }}/bin/targets/*/*/packages/*luci-i18n-nodemanager-zh-cn_*.ipk
