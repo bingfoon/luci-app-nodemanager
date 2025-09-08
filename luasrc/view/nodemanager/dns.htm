@@ -1,0 +1,62 @@
+<%+header%>
+<h2><%:Node Manager - DNS%></h2>
+
+<form id="dnsForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/dns')%>">
+  <input type="hidden" name="token" value="<%=token%>"/>
+
+  <table class="table">
+    <thead>
+      <tr><th>DNS IP</th><th></th></tr>
+    </thead>
+    <tbody id="dnsBody">
+      <% for _,ip in ipairs(servers or {}) do %>
+      <tr>
+        <td><input class="cbi-input-text" name="dns[]" value="<%=ip%>" placeholder="223.5.5.5" required/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+      <% if not servers or #servers==0 then %>
+      <tr>
+        <td><input class="cbi-input-text" name="dns[]" placeholder="223.5.5.5" required/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+    </tbody>
+  </table>
+
+  <div>
+    <button type="button" class="cbi-button cbi-button-add" onclick="addRow()"><%:Add%></button>
+    <button id="saveBtn" type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+  </div>
+</form>
+
+<script>
+function addRow(){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="cbi-input-text" name="dns[]" placeholder="223.5.5.5" required/></td>
+    <td><button type="button" class="cbi-button cbi-button-remove" onclick="rmRow(this)">✕</button></td>
+  `;
+  document.getElementById('dnsBody').appendChild(tr);
+}
+function rmRow(btn){ btn.closest('tr').remove(); }
+
+async function postForm(form){
+  const token = "<%=token%>" || "";
+  const url = form.action + (token ? ("?token="+encodeURIComponent(token)) : "");
+  const btn = document.getElementById('saveBtn'); btn && (btn.disabled = true);
+  try{
+    const resp = await fetch(url, {
+      method: 'POST',
+      body: new FormData(form),
+      credentials:'same-origin',
+      headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}
+    });
+    const text = await resp.text();
+    let j; try{ j = JSON.parse(text) } catch(e){ alert('Save failed: HTTP '+resp.status+'\n'+text.slice(0,200)); return; }
+    if (j.code===0) location.reload(); else alert(j.msg||'Error');
+  }catch(e){ alert('Network error: '+e) } finally { btn && (btn.disabled=false) }
+}
+document.getElementById('dnsForm').addEventListener('submit', e=>{ e.preventDefault(); postForm(e.target); });
+</script>
+<%+footer%>

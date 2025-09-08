@@ -1,0 +1,92 @@
+msgid "Node Manager"
+msgstr "节点管理"
+
+msgid "Proxies"
+msgstr "节点"
+
+msgid "Providers"
+msgstr "机场列表"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Logs"
+msgstr "日志"
+
+msgid "Name"
+msgstr "节点名称"
+
+msgid "Server (IP or Domain)"
+msgstr "服务器（域名或IP）"
+
+msgid "Port"
+msgstr "端口"
+
+msgid "Username"
+msgstr "用户名"
+
+msgid "Password"
+msgstr "密码"
+
+msgid "Bind IP (/32)"
+msgstr "绑定内网IP（/32）"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Provider Name"
+msgstr "机场名称"
+
+msgid "Subscribe URL"
+msgstr "订阅地址"
+
+msgid "Nameserver (IPv4)"
+msgstr "上游DNS（IPv4）"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Fields cannot be empty"
+msgstr "字段不能为空"
+
+msgid "Invalid server at row %d"
+msgstr "第 %d 行服务器地址不合法"
+
+msgid "Invalid port at row %d"
+msgstr "第 %d 行端口不合法"
+
+msgid "Invalid bind IP at row %d"
+msgstr "第 %d 行绑定IP不合法"
+
+msgid "Invalid URL at row %d"
+msgstr "第 %d 行URL不合法"
+
+msgid "DNS cannot be empty"
+msgstr "DNS 不能为空"
+
+msgid "Invalid DNS at row %d"
+msgstr "第 %d 行DNS不合法"
+
+msgid "Config file not found: "
+msgstr "未找到配置文件："
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Config file path"
+msgstr "配置文件路径"
+
+msgid "Create the file if missing"
+msgstr "若不存在则创建"
+
+msgid "Current file:"
+msgstr "当前文件："
+
+msgid "Path cannot be empty"
+msgstr "路径不能为空"
+
+msgid "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."
+msgstr "所选配置应包含本插件使用的锚点注释，否则编辑将失败。"

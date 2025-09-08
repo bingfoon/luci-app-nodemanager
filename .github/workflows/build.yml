@@ -1,0 +1,138 @@
+name: build-luci-app-nodemanager
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          #- name: mediatek-filogic
+          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - name: x86-64
+            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+    env:
+      PACKAGE_NAME: luci-app-nodemanager
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install minimal deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl
+
+      - name: Download & extract SDK (to RUNNER_TEMP, avoid recursion)
+        run: |
+          set -euo pipefail
+          curl -fL -o sdk.tar.zst "${{ matrix.target.sdk }}"
+          mkdir -p "$RUNNER_TEMP/sdk"
+          tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
+          SDK_BASE="$(tar -I zstd -tf sdk.tar.zst | head -1 | cut -d/ -f1)"
+          SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
+          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
+          ln -s "$SDK_DIR" sdk
+
+      - name: Setup feeds (luci only)
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          BRANCH="openwrt-24.10"
+          if [ ! -x scripts/feeds ]; then
+            mkdir -p scripts
+            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
+            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
+            chmod +x scripts/feeds
+          fi
+          echo "src-git luci https://github.com/openwrt/luci.git;openwrt-24.10" > feeds.conf
+          ./scripts/feeds update luci
+          ./scripts/feeds install -p luci luci-base luci-compat
+
+      - name: Remove lucihttp to avoid lua toolchain deps
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          rm -rf feeds/luci/contrib/package/lucihttp || true
+
+      - name: Init defconfig
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          : > .config
+          make defconfig
+
+      - name: Prepare package inside SDK (copy only repo, exclude SDK)
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          PKGDIR="$SDK_DIR/package/$PACKAGE_NAME"
+          rm -rf "$PKGDIR"; mkdir -p "$PKGDIR"
+          rsync -a --delete \
+            --exclude '.git' --exclude '.github' \
+            --exclude 'sdk' --exclude 'sdk.tar.zst' \
+            --exclude 'openwrt-sdk-*' \
+            --exclude 'out' \
+            ./ "$PKGDIR/"
+          # flatten if nested
+          if [ ! -f "$PKGDIR/Makefile" ] && [ -f "$PKGDIR/$PACKAGE_NAME/Makefile" ]; then
+            rsync -a "$PKGDIR/$PACKAGE_NAME/" "$PKGDIR/"; rm -rf "$PKGDIR/$PACKAGE_NAME"
+          fi
+          test -f "$PKGDIR/Makefile" || { echo "::error::Makefile not found in $PKGDIR"; exit 1; }
+
+      - name: Build po2lmo (host tool for i18n)
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          make -C feeds/luci/modules/luci-base/src clean po2lmo V=s
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
+          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
+          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
+
+      - name: Enable our package in .config
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          {
+            echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
+            echo "CONFIG_LUCI_LANG_en=y"
+            echo "CONFIG_LUCI_LANG_zh_Hans=y"
+          } >> .config
+          make defconfig
+          grep -n "CONFIG_PACKAGE_${PACKAGE_NAME}" .config || { echo "::error::config not effective"; exit 1; }
+
+      - name: Compile ONLY our package (and zh-cn i18n subpkg)
+        env:
+          PO2LMO: ${{ env.PO2LMO }}
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
+
+      - name: Collect & upload artifacts
+        run: |
+          set -e
+          cd "$SDK_DIR"
+          OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
+          mkdir -p "$OUT"
+          found=0
+          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f -name "${PACKAGE_NAME}_*.ipk" -print0)
+          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f \( -name "luci-i18n-nodemanager-zh-cn_*.ipk" -o -name "luci-i18n-nodemanager-zh-hans_*.ipk" \) -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No ipk found under bin/"
+            find bin -type f -name '*.ipk' -print
+            exit 1
+          fi
+          ls -l "$OUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-nodemanager-${{ matrix.target.name }}
+          path: out/${{ matrix.target.name }}
+          if-no-files-found: error

@@ -1,0 +1,176 @@
+<%+header%>
+<h2><%:Node Manager - Proxies%></h2>
+<% if errmsg then %><div class="alert-message warning"><%=errmsg%></div><% end %>
+
+<style>
+  .nm-dnd-table .handle { cursor: move; font-size: 18px; width: 2.2em; text-align: center; user-select: none; }
+  .nm-dnd-table tr.dragging { opacity: .6; }
+  .nm-dnd-table input { width: 100%; box-sizing: border-box; }
+  .nm-actions { margin-top: .6em; display:flex; gap:.5em; }
+</style>
+
+<form id="proxyForm" method="post" action="<%=luci.dispatcher.build_url('admin/services/nodemanager/proxies')%>">
+  <input type="hidden" name="token" value="<%=token%>"/>
+
+  <table class="table nm-dnd-table">
+    <thead>
+      <tr>
+        <th style="width:2.2em">⇅</th>
+        <th><%:Name%></th>
+        <th><%:Server (IP or Domain)%></th>
+        <th style="width:6em"><%:Port%></th>
+        <th><%:Username%></th>
+        <th><%:Password%></th>
+        <th><%:Bind IPs (/32)%></th>
+        <th style="width:3em"></th>
+      </tr>
+    </thead>
+    <tbody id="proxyBody">
+      <% for i,p in ipairs(proxies or {}) do
+           local raw = bindmap and bindmap[p.name]
+           local ipsval = ""
+           if type(raw) == "table" then
+             ipsval = table.concat(raw, ", ")
+           elseif type(raw) == "string" then
+             ipsval = raw
+           else
+             ipsval = ""
+           end
+      %>
+      <tr>
+        <td class="handle" title="<%:Drag to reorder%>">☰</td>
+        <td><input class="cbi-input-text" name="name[]" value="<%=p.name%>" required/></td>
+        <td><input class="cbi-input-text" name="server[]" value="<%=p.server%>" required/></td>
+        <td><input class="cbi-input-text" name="port[]" value="<%=p.port%>" required/></td>
+        <td><input class="cbi-input-text" name="username[]" value="<%=p.username%>" required/></td>
+        <td><input class="cbi-input-text" name="password[]" value="<%=p.password%>" required/></td>
+        <td><input class="cbi-input-text" name="bindips[]" value="<%=ipsval%>" placeholder="192.168.8.101, 192.168.8.102"/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="nmRmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+      <% if not proxies or #proxies==0 then %>
+      <tr>
+        <td class="handle" title="<%:Drag to reorder%>">☰</td>
+        <td><input class="cbi-input-text" name="name[]" required/></td>
+        <td><input class="cbi-input-text" name="server[]" required/></td>
+        <td><input class="cbi-input-text" name="port[]" required/></td>
+        <td><input class="cbi-input-text" name="username[]" required/></td>
+        <td><input class="cbi-input-text" name="password[]" required/></td>
+        <td><input class="cbi-input-text" name="bindips[]" placeholder="192.168.8.101, 192.168.8.102"/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="nmRmRow(this)">✕</button></td>
+      </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <div class="nm-actions">
+    <button type="button" class="cbi-button cbi-button-add" onclick="nmAddRow()"><%:Add%></button>
+    <button id="saveBtn" type="submit" class="cbi-button cbi-button-apply"><%:Save%></button>
+  </div>
+</form>
+
+<script>
+(function(){
+  function nmRow() {
+    return `
+      <tr>
+        <td class="handle" title="${_('Drag to reorder')}">☰</td>
+        <td><input class="cbi-input-text" name="name[]" required/></td>
+        <td><input class="cbi-input-text" name="server[]" required/></td>
+        <td><input class="cbi-input-text" name="port[]" required/></td>
+        <td><input class="cbi-input-text" name="username[]" required/></td>
+        <td><input class="cbi-input-text" name="password[]" required/></td>
+        <td><input class="cbi-input-text" name="bindips[]" placeholder="192.168.8.101, 192.168.8.102"/></td>
+        <td><button type="button" class="cbi-button cbi-button-remove" onclick="nmRmRow(this)">✕</button></td>
+      </tr>`;
+  }
+
+  // Expose add/remove for buttons
+  window.nmAddRow = function() {
+    const tbody = document.getElementById('proxyBody');
+    const temp = document.createElement('tbody');
+    temp.innerHTML = nmRow();
+    const tr = temp.firstElementChild;
+    tbody.appendChild(tr);
+    attachDrag(tr);
+  }
+  window.nmRmRow = function(btn) {
+    btn.closest('tr').remove();
+  }
+
+  // --- Drag & Drop ----
+  let dragSrc = null;
+  function getRow(el){ while (el && el.tagName !== 'TR') el = el.parentNode; return el; }
+
+  function onDragStart(e){
+    const tr = getRow(e.target);
+    dragSrc = tr;
+    tr.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // setData is required in Firefox
+    try { e.dataTransfer.setData('text/plain', ''); } catch(e) {}
+  }
+  function onDragOver(e){
+    if (!dragSrc) return;
+    e.preventDefault(); // allow drop
+    const tbody = document.getElementById('proxyBody');
+    const target = getRow(e.target);
+    if (!target || target === dragSrc || target.parentNode !== tbody) return;
+    const rect = target.getBoundingClientRect();
+    const after = (e.clientY - rect.top) > (rect.height / 2);
+    tbody.insertBefore(dragSrc, after ? target.nextSibling : target);
+  }
+  function onDragEnd(e){
+    const tr = dragSrc;
+    dragSrc = null;
+    tr && tr.classList.remove('dragging');
+  }
+
+  function attachDrag(tr){
+    tr.setAttribute('draggable', 'true');
+    tr.addEventListener('dragstart', onDragStart);
+    tr.addEventListener('dragend', onDragEnd);
+    // Also allow dragging via the handle only
+    const handle = tr.querySelector('.handle');
+    if (handle) {
+      handle.style.cursor = 'move';
+      handle.addEventListener('mousedown', function(){ /* visual hint only */ });
+    }
+  }
+
+  document.getElementById('proxyBody').addEventListener('dragover', onDragOver);
+  document.querySelectorAll('#proxyBody tr').forEach(attachDrag);
+
+  // --- Submit via fetch (keeps DOM order -> FormData order) ---
+  async function postForm(form) {
+    const token = "<%=token%>" || "";
+    const url = form.action + (token ? ("?token="+encodeURIComponent(token)) : "");
+    const btn = document.getElementById('saveBtn');
+    btn && (btn.disabled = true);
+
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        body: new FormData(form),          // NOTE: respects current DOM row order
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+      });
+      const text = await resp.text();
+      let j;
+      try { j = JSON.parse(text); }
+      catch (e) { alert('Save failed: HTTP ' + resp.status + '\\n' + text.slice(0, 200)); return; }
+      if (j.code === 0) location.reload();
+      else alert(j.msg || 'Error');
+    } catch (err) {
+      alert('Network error: ' + err);
+    } finally {
+      btn && (btn.disabled = false);
+    }
+  }
+  document.getElementById('proxyForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    postForm(e.target);
+  });
+})();
+</script>
+
+<%+footer%>
