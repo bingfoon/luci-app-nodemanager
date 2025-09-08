@@ -1,115 +1,106 @@
-name: build-luci-app-nodemanager
+name: Build (OpenWrt SDK 24.10.2 x86_64)
 
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - '**'
+    branches: [ main, master ]
   pull_request:
-    paths:
-      - '**'
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
       PACKAGE_NAME: luci-app-nodemanager
       OWRT_VER: 24.10.2
-      TARGET: x86
-      SUBTARGET: 64
+      OWRT_TARGET: x86
+      OWRT_SUBTARGET: 64
+      SDK_FILE: openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+      SDK_URL: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install prerequisites
+      - name: Install host deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential git python3 cmake ninja-build zstd rsync
+          sudo apt-get install -y build-essential cmake ninja-build python3 curl git zstd
 
-      - name: Download & unpack OpenWrt SDK
-        shell: bash
+      - name: Download OpenWrt SDK
         run: |
           set -euo pipefail
-          SDK_URL="https://downloads.openwrt.org/releases/${OWRT_VER}/targets/${TARGET}/${SUBTARGET}/openwrt-sdk-${OWRT_VER}-${TARGET}-${SUBTARGET}_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          echo "SDK_URL=${SDK_URL}"
-          curl -fL -o sdk.tar.zst "${SDK_URL}"
+          curl -fL --retry 5 -o "$SDK_FILE" "$SDK_URL"
           mkdir -p "$RUNNER_TEMP/sdk"
-          tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
-          tar -I zstd -tf sdk.tar.zst > /tmp/sdk.list
-          SDK_BASE="$(head -1 /tmp/sdk.list | cut -d/ -f1)"
+          # 避免 head 提前关管道导致 tar "write error"
+          tar -I zstd -tf "$SDK_FILE" > "$RUNNER_TEMP/sdk/list.txt"
+          SDK_BASE="$(head -n1 "$RUNNER_TEMP/sdk/list.txt" | cut -d/ -f1)"
+          tar -I zstd -xf "$SDK_FILE" -C "$RUNNER_TEMP/sdk"
           SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
           ln -s "$SDK_DIR" sdk
 
-      - name: Sync repo into SDK/package/
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$SDK_DIR/package/${PACKAGE_NAME}"
-          rsync -a --delete --exclude '.git' --exclude '.github' ./ "$SDK_DIR/package/${PACKAGE_NAME}/"
-
-      - name: Update & install feeds
-        shell: bash
+      - name: Setup feeds
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Build po2lmo/jsmin (host tools) directly
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$SDK_DIR/feeds/luci/modules/luci-base/src"
-          make -j"$(nproc)" po2lmo jsmin
-          install -d "$SDK_DIR/staging_dir/hostpkg/bin"
-          install -m0755 po2lmo "$SDK_DIR/staging_dir/hostpkg/bin/po2lmo"
-          install -m0755 jsmin  "$SDK_DIR/staging_dir/hostpkg/bin/jsmin"
-
-      - name: Prepare minimal .config (enable zh-cn)
-        shell: bash
+      - name: Add package into SDK
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
-          rm -f .config
-          {
-            echo "CONFIG_TARGET_${TARGET}=y"
-            echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y"
-            echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
-            # 开启简体中文语言（新老符号都尝试一下，兼容不同分支）
-            echo "CONFIG_LUCI_LANG_zh_Hans=y"
-            echo "CONFIG_LUCI_LANG_zh-cn=y"
-          } > .config
-          make defconfig
+          rm -rf "package/$PACKAGE_NAME"
+          ln -s "$GITHUB_WORKSPACE" "package/$PACKAGE_NAME"
+          if [ -d "$GITHUB_WORKSPACE/po" ]; then
+            find "$GITHUB_WORKSPACE/po" -maxdepth 2 -type f -name 'nodemanager.po' -printf 'Found i18n: %P\n' || true
+          fi
 
-      - name: Build package and zh-cn i18n
-        shell: bash
-        env:
-          LUCI_MINIFY: "0"
+      - name: Build package
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
-          export PO2LMO="$PWD/staging_dir/hostpkg/bin/po2lmo"
-          APP_SUFFIX="${PACKAGE_NAME#luci-app-}"
-          # 串行避免依赖竞态，同时把 i18n 一并编出来
-          make -j1 V=s \
-            package/${PACKAGE_NAME}/compile \
-            package/luci-i18n-${APP_SUFFIX}-zh-cn/compile
+          make -j"$(nproc)" V=s package/$PACKAGE_NAME/compile
 
-      - name: Collect .ipk artifacts
-        if: always()
-        shell: bash
+      - name: Build i18n subpackages (if any)
         run: |
           set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          find "$SDK_DIR/bin" -type f -name "*.ipk" -print -exec cp -v "{}" "$GITHUB_WORKSPACE/artifacts/" \;
+          cd "$SDK_DIR"
+          lang_suffix() {
+            case "$1" in
+              zh_Hans|zh-cn) echo zh-cn ;;
+              zh_Hant|zh-tw) echo zh-tw ;;
+              *) echo "$1" ;;
+            esac
+          }
+          if [ -d "$GITHUB_WORKSPACE/po" ]; then
+            for d in "$GITHUB_WORKSPACE"/po/*; do
+              [ -d "$d" ] || continue
+              base="$(basename "$d")"
+              code="$(lang_suffix "$base")"
+              make -j"$(nproc)" V=s package/luci-i18n-nodemanager-"$code"/compile || true
+            done
+          fi
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          set -e
+          OUT_DIR="$SDK_DIR/bin/targets/$OWRT_TARGET/$OWRT_SUBTARGET/packages"
+          if [ -d "$OUT_DIR" ]; then
+            mkdir -p "$GITHUB_WORKSPACE/output"
+            cp -v "$OUT_DIR"/luci-app-nodemanager_*.ipk "$GITHUB_WORKSPACE/output/" || true
+            cp -v "$OUT_DIR"/luci-i18n-nodemanager-*_*.ipk "$GITHUB_WORKSPACE/output/" || true
+            ls -l "$GITHUB_WORKSPACE/output" || true
+          else
+            echo "No output dir: $OUT_DIR"
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipks-${{ env.OWRT_VER }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
-          path: artifacts/*.ipk
+          name: ipk-${{ env.OWRT_VER }}-${{ env.OWRT_TARGET }}-${{ env.OWRT_SUBTARGET }}
+          path: output/*.ipk
+          if-no-files-found: warn

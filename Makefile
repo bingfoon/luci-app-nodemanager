@@ -1,23 +1,24 @@
+# SPDX-License-Identifier: MIT
+# This is a minimal, modern LuCI app Makefile that auto-builds i18n packages.
+
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-nodemanager
 PKG_VERSION:=1.0.1
-PKG_RELEASE:=r5
-
+PKG_RELEASE:=6
 PKG_LICENSE:=MIT
-PKG_MAINTAINER:=BingFoon Lee
-PKG_BUILD_DEPENDS:=po2lmo/host   # <== 关键：确保编译 po2lmo
 
+# ===== LuCI meta =====
 LUCI_TITLE:=Node Manager
+# 根据你的实际运行依赖按需补充。最小只要 luci-base 即可。
+LUCI_DEPENDS:=+luci-base
+# 纯前端/脚本类应用通常可设为 all
 LUCI_PKGARCH:=all
-LUCI_DEPENDS:=+luci-compat
 
+# 开启 i18n：指向翻译目录（见下方目录结构说明）
 PO:=po
 
-define Package/luci-app-nodemanager/conffiles
-/etc/config/nodemanager
-endef
+include $(TOPDIR)/feeds/luci/luci.mk
 
-include $(TOPDIR)/feeds/luci/luci.mk   # <== 关键：用 luci.mk 自动处理 i18n
-
-# call BuildPackage - OpenWrt build system will create i18n subpackages automatically
+# 下面这行由 luci.mk 内部完成，不需要你再写：
+# $(eval $(call BuildPackage,$(PKG_NAME)))
