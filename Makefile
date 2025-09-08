@@ -12,6 +12,8 @@ LUCI_TITLE:=Node Manager
 LUCI_PKGARCH:=all
 LUCI_DEPENDS:=+luci-compat
 
+PO:=po
+
 define Package/luci-app-nodemanager/conffiles
 /etc/config/nodemanager
 endef

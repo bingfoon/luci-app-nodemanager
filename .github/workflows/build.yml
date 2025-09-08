@@ -37,7 +37,6 @@ jobs:
           curl -fL -o sdk.tar.zst "${SDK_URL}"
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
-          # 避免 pipe SIGPIPE
           tar -I zstd -tf sdk.tar.zst > /tmp/sdk.list
           SDK_BASE="$(head -1 /tmp/sdk.list | cut -d/ -f1)"
           SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
@@ -70,7 +69,7 @@ jobs:
           install -m0755 po2lmo "$SDK_DIR/staging_dir/hostpkg/bin/po2lmo"
           install -m0755 jsmin  "$SDK_DIR/staging_dir/hostpkg/bin/jsmin"
 
-      - name: Prepare minimal .config
+      - name: Prepare minimal .config (enable zh-cn)
         shell: bash
         run: |
           set -euo pipefail
@@ -80,20 +79,26 @@ jobs:
             echo "CONFIG_TARGET_${TARGET}=y"
             echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y"
             echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
+            # 开启简体中文语言（新老符号都尝试一下，兼容不同分支）
+            echo "CONFIG_LUCI_LANG_zh_Hans=y"
+            echo "CONFIG_LUCI_LANG_zh-cn=y"
           } > .config
           make defconfig
 
-      - name: Build ${{ env.PACKAGE_NAME }}
+      - name: Build package and zh-cn i18n
         shell: bash
         env:
-          LUCI_MINIFY: "0"  # 关闭 LuCI 压缩，避免 luasrcdiet/host 依赖
+          LUCI_MINIFY: "0"
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           export PO2LMO="$PWD/staging_dir/hostpkg/bin/po2lmo"
-          # 串行编译，避免依赖次序导致的头文件缺失
-          make -j1 V=s package/${PACKAGE_NAME}/compile
+          APP_SUFFIX="${PACKAGE_NAME#luci-app-}"
+          # 串行避免依赖竞态，同时把 i18n 一并编出来
+          make -j1 V=s \
+            package/${PACKAGE_NAME}/compile \
+            package/luci-i18n-${APP_SUFFIX}-zh-cn/compile
 
       - name: Collect .ipk artifacts
         if: always()
