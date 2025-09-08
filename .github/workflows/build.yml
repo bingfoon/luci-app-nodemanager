@@ -33,9 +33,8 @@ jobs:
           set -euo pipefail
           curl -fL --retry 5 -o "$SDK_FILE" "$SDK_URL"
           mkdir -p "$RUNNER_TEMP/sdk"
-          # 先列出归档的第一层目录名，再解包，避免管道写错误
-          tar -I zstd -tf "$SDK_FILE" > "$RUNNER_TEMP/sdk/list.txt"
-          SDK_BASE="$(head -n1 "$RUNNER_TEMP/sdk/list.txt" | cut -d/ -f1)"
+          tar -I zstd -tf "$SDK_FILE" | head -n1 | cut -d/ -f1 > "$RUNNER_TEMP/base.txt"
+          SDK_BASE="$(cat "$RUNNER_TEMP/base.txt")"
           tar -I zstd -xf "$SDK_FILE" -C "$RUNNER_TEMP/sdk"
           SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
           echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
@@ -49,11 +48,19 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Prepare .config (non-interactive)
+      - name: Prepare .config with LuCI zh-cn enabled (non-interactive)
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
-          # 生成默认配置，避免触发 menuconfig（TUI）
+          # 先生成一个基础 .config
+          make defconfig
+          # 启用 LuCI 中文语言开关（生成 luci-i18n-* 包的前置条件）
+          {
+            echo 'CONFIG_LUCI_LANG_zh_Hans=y'
+            # 如需台繁也一起打包再打开下一行：
+            # echo 'CONFIG_LUCI_LANG_zh_Hant=y'
+          } >> .config
+          # 展开配置
           make defconfig
 
       - name: Add package into SDK
@@ -62,9 +69,6 @@ jobs:
           cd "$SDK_DIR"
           rm -rf "package/$PACKAGE_NAME"
           ln -s "$GITHUB_WORKSPACE" "package/$PACKAGE_NAME"
-          if [ -d "$GITHUB_WORKSPACE/po" ]; then
-            find "$GITHUB_WORKSPACE/po" -maxdepth 2 -type f -name 'nodemanager.po' -printf 'Found i18n: %P\n' || true
-          fi
 
       - name: Build package
         run: |
@@ -73,7 +77,8 @@ jobs:
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
           make -j"$(nproc)" V=s package/$PACKAGE_NAME/compile
 
-      - name: Build i18n subpackages (if any)
+      # 可选：按 po/ 目录尝试逐个语言的 i18n 子包（如果没定义也不会失败）
+      - name: Build i18n subpackages (best effort)
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
@@ -96,16 +101,19 @@ jobs:
       - name: Collect artifacts
         if: always()
         run: |
-          set -e
-          OUT_DIR="$SDK_DIR/bin/targets/$OWRT_TARGET/$OWRT_SUBTARGET/packages"
-          if [ -d "$OUT_DIR" ]; then
-            mkdir -p "$GITHUB_WORKSPACE/output"
-            cp -v "$OUT_DIR"/luci-app-nodemanager_*.ipk "$GITHUB_WORKSPACE/output/" || true
-            cp -v "$OUT_DIR"/luci-i18n-nodemanager-*_*.ipk "$GITHUB_WORKSPACE/output/" || true
-            ls -l "$GITHUB_WORKSPACE/output" || true
-          else
-            echo "No output dir: $OUT_DIR"
-          fi
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/output"
+          mkdir -p "$OUT"
+          # LuCI 应用/翻译通常在 bin/packages/<arch>/<feed>/
+          # 但也兼容少数会落在 bin/targets/<target>/<subtarget>/packages/ 的情况
+          find "$SDK_DIR/bin" -type f \( \
+              -name 'luci-app-nodemanager_*.ipk' -o \
+              -name 'luci-i18n-nodemanager-*_*.ipk' \
+            \) -print -exec cp -v {} "$OUT"/ \; || true
+          echo "=== Tree of bin ==="
+          (cd "$SDK_DIR/bin" && find . -maxdepth 3 -type d -print | sort)
+          echo "=== Collected ==="
+          ls -l "$OUT" || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
