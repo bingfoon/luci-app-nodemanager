@@ -25,11 +25,10 @@ jobs:
             echo 'PKG_NAME:=luci-i18n-nodemanager-zh-cn'
             echo 'PKG_RELEASE:=1'
             echo ''
-            echo 'PKG_BUILD_DEPENDS:=luci-base/host'
-            echo ''
             echo 'include $(INCLUDE_DIR)/package.mk'
             echo ''
-            echo 'PO2LMO:=$(STAGING_DIR_HOSTPKG)/bin/po2lmo'
+            echo '# 优先用 hostpkg 的 po2lmo，不存在就用 luci 源码目录里的二进制'
+            echo 'PO2LMO:=$(if $(wildcard $(STAGING_DIR_HOSTPKG)/bin/po2lmo),$(STAGING_DIR_HOSTPKG)/bin/po2lmo,$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo)'
             echo ''
             echo 'define Package/$(PKG_NAME)'
             echo '  SECTION:=luci'
@@ -40,7 +39,9 @@ jobs:
             echo '  DEPENDS:=+luci-app-nodemanager'
             echo 'endef'
             echo ''
+            echo '# 确保本地 po2lmo 已构建（不会触发 menuconfig）'
             echo 'define Build/Compile'
+            echo '  $$(MAKE) -C $(TOPDIR)/feeds/luci/modules/luci-base/src po2lmo'
             echo 'endef'
             echo ''
             echo 'define Package/$(PKG_NAME)/install'
@@ -63,7 +64,7 @@ jobs:
             echo ''
             echo '$(eval $(call BuildPackage,$(PKG_NAME)))'
           } > "$MKDIR/Makefile"
-          # 把 @TAB@ 替换成真实的制表符，避免 "missing separator"
+          # 把 @TAB@ 替换为真实 Tab，避免 "missing separator"
           perl -0777 -pe 's/^@TAB@/\t/mg' -i "$MKDIR/Makefile"
 
       - name: Download & extract OpenWrt SDK
@@ -90,11 +91,11 @@ jobs:
           rm -rf "$SDK_DIR/package/luci-app-nodemanager"
           ln -s "$GITHUB_WORKSPACE" "$SDK_DIR/package/luci-app-nodemanager"
 
-      - name: Build po2lmo (host)
+      - name: Build po2lmo (local, non-interactive)
         shell: bash
         run: |
           set -e
-          make -C "$SDK_DIR" package/feeds/luci/luci-base/host/compile V=s
+          make -C "$SDK_DIR/feeds/luci/modules/luci-base/src" po2lmo
 
       - name: Build luci-app-nodemanager
         shell: bash
