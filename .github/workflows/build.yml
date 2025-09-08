@@ -16,56 +16,54 @@ jobs:
       - name: Prepare zh-cn i18n Makefile (inside repo)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           MKDIR="package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn"
           mkdir -p "$MKDIR"
-
-          cat > "$MKDIR/Makefile" <<'EOF'
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=luci-i18n-nodemanager-zh-cn
-PKG_RELEASE:=1
-
-PKG_BUILD_DEPENDS:=luci-base/host
-
-include $(INCLUDE_DIR)/package.mk
-
-PO2LMO:=$(STAGING_DIR_HOSTPKG)/bin/po2lmo
-
-define Package/$(PKG_NAME)
-  SECTION:=luci
-  CATEGORY:=LuCI
-  SUBMENU:=3. Applications
-  TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
-  PKGARCH:=all
-  DEPENDS:=+luci-app-nodemanager
-endef
-
-define Build/Compile
-endef
-
-define Package/$(PKG_NAME)/install
-@TAB@$(INSTALL_DIR) $(1)/usr/share/luci/i18n
-@TAB@set -e; \
-@TAB@PDIR=""; \
-@TAB@for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \
-@TAB@  if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \
-@TAB@done; \
-@TAB@[ -n "$$PDIR" ] || { echo "ERROR: no po dir (po/zh_Hans or po/zh-cn) under luci-app-nodemanager" >&2; exit 1; }; \
-@TAB@ok=0; \
-@TAB@for p in "$$PDIR"/*.po; do \
-@TAB@  [ -f "$$p" ] || continue; \
-@TAB@  ok=1; \
-@TAB@  b=$$(basename "$$p" .po); \
-@TAB@  $(PO2LMO) "$$p" "$(1)/usr/share/luci/i18n/$$b.zh-cn.lmo"; \
-@TAB@done; \
-@TAB@[ "$$ok" -eq 1 ] || { echo "ERROR: no .po files in $$PDIR" >&2; exit 1; }
-endef
-
-$(eval $(call BuildPackage,$(PKG_NAME)))
-EOF
-
-          # 把行首 @TAB@ 替换为真实 Tab（至关重要，避免 missing separator）
+          {
+            echo 'include $(TOPDIR)/rules.mk'
+            echo ''
+            echo 'PKG_NAME:=luci-i18n-nodemanager-zh-cn'
+            echo 'PKG_RELEASE:=1'
+            echo ''
+            echo 'PKG_BUILD_DEPENDS:=luci-base/host'
+            echo ''
+            echo 'include $(INCLUDE_DIR)/package.mk'
+            echo ''
+            echo 'PO2LMO:=$(STAGING_DIR_HOSTPKG)/bin/po2lmo'
+            echo ''
+            echo 'define Package/$(PKG_NAME)'
+            echo '  SECTION:=luci'
+            echo '  CATEGORY:=LuCI'
+            echo '  SUBMENU:=3. Applications'
+            echo '  TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager'
+            echo '  PKGARCH:=all'
+            echo '  DEPENDS:=+luci-app-nodemanager'
+            echo 'endef'
+            echo ''
+            echo 'define Build/Compile'
+            echo 'endef'
+            echo ''
+            echo 'define Package/$(PKG_NAME)/install'
+            echo '@TAB@$(INSTALL_DIR) $(1)/usr/share/luci/i18n'
+            echo '@TAB@set -e; \'
+            echo '@TAB@PDIR=""; \'
+            echo '@TAB@for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \'
+            echo '@TAB@  if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \'
+            echo '@TAB@done; \'
+            echo '@TAB@[ -n "$$PDIR" ] || { echo "ERROR: no po dir (po/zh_Hans or po/zh-cn) under luci-app-nodemanager" >&2; exit 1; }; \'
+            echo '@TAB@ok=0; \'
+            echo '@TAB@for p in "$$PDIR"/*.po; do \'
+            echo '@TAB@  [ -f "$$p" ] || continue; \'
+            echo '@TAB@  ok=1; \'
+            echo '@TAB@  b=$$(basename "$$p" .po); \'
+            echo '@TAB@  $(PO2LMO) "$$p" "$(1)/usr/share/luci/i18n/$$b.zh-cn.lmo"; \'
+            echo '@TAB@done; \'
+            echo '@TAB@[ "$$ok" -eq 1 ] || { echo "ERROR: no .po files in $$PDIR" >&2; exit 1; }'
+            echo 'endef'
+            echo ''
+            echo '$(eval $(call BuildPackage,$(PKG_NAME)))'
+          } > "$MKDIR/Makefile"
+          # 把 @TAB@ 替换成真实的制表符，避免 "missing separator"
           perl -0777 -pe 's/^@TAB@/\t/mg' -i "$MKDIR/Makefile"
 
       - name: Download & extract OpenWrt SDK
@@ -108,7 +106,6 @@ EOF
         shell: bash
         run: |
           set -e
-          # i18n 在你的仓库子目录下（通过上面的 symlink 出现在 SDK 里）
           make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/package/luci-i18n-nodemanager-zh-cn/compile
 
       - name: Upload artifacts
