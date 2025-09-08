@@ -86,6 +86,52 @@ jobs:
               install -Dm755 feeds/luci/modules/luci-base/src/po2lmo "$PWD/staging_dir/hostpkg/bin/po2lmo"
             fi
           fi
+          
+      - name: Create i18n package Makefile
+        run: |
+          mkdir -p package/luci-i18n-nodemanager-zh-cn
+          cat > package/luci-i18n-nodemanager-zh-cn/Makefile <<'EOF'
+          include $(TOPDIR)/rules.mk
+
+          PKG_NAME:=luci-i18n-nodemanager-zh-cn
+          PKG_RELEASE:=1
+          PKG_BUILD_DEPENDS:=luci-base/host
+
+          include $(INCLUDE_DIR)/package.mk
+
+          define Package/$(PKG_NAME)
+            SECTION:=luci
+            CATEGORY:=LuCI
+            SUBMENU:=3. Applications
+            TITLE:=LuCI translation Chinese (zh-cn) for luci-app-nodemanager
+            PKGARCH:=all
+            DEPENDS:=+luci-app-nodemanager
+          endef
+
+          define Build/Compile
+          endef
+
+          define Package/$(PKG_NAME)/install
+            $(INSTALL_DIR) $(1)/usr/share/luci/i18n
+            @set -e; \
+            for d in "$(TOPDIR)/package/luci-app-nodemanager/po/zh_Hans" "$(TOPDIR)/package/luci-app-nodemanager/po/zh-cn"; do \
+              if [ -d "$$d" ]; then PDIR="$$d"; break; fi; \
+            done; \
+            [ -n "$$PDIR" ] || { echo "ERROR: no po dir: po/zh_Hans or po/zh-cn" >&2; exit 1; }; \
+            POFILE=$$(find "$$PDIR" -maxdepth 1 -type f -name '*.po' | head -n1); \
+            [ -n "$$POFILE" ] || { echo "ERROR: no .po file found in $$PDIR" >&2; exit 1; }; \
+            DOMAIN=$$(basename "$$POFILE" .po); \
+            PO2LMO="$(STAGING_DIR_HOSTPKG)/bin/po2lmo"; \
+            [ -x "$$PO2LMO" ] || PO2LMO="$(TOPDIR)/feeds/luci/modules/luci-base/src/po2lmo"; \
+            [ -x "$$PO2LMO" ] || { echo "ERROR: po2lmo not found"; exit 1; }; \
+            "$$PO2LMO" "$$POFILE" "$(1)/usr/share/luci/i18n/$$DOMAIN.zh-cn.lmo"
+          endef
+
+          $(eval $(call BuildPackage,$(PKG_NAME)))
+          EOF
+
+          # 可选：验证文件里仍然有 "$$"
+          grep -n '\$\$' package/luci-i18n-nodemanager-zh-cn/Makefile || true
 
       - name: Create zh-cn i18n package (real dir)
         run: |

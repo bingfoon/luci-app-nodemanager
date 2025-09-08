@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-i18n-nodemanager-zh-cn
-PKG_RELEASE:=1
+PKG_RELEASE:=6
 
 # 确保 host 侧 po2lmo 先被编好
 PKG_BUILD_DEPENDS:=luci-base/host
