@@ -1,139 +1,107 @@
 name: build-luci-app-nodemanager
+
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '**'
+  pull_request:
+    paths:
+      - '**'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          #- name: mediatek-filogic
-          #  sdk: https://downloads.openwrt.org/releases/24.10.2/targets/mediatek/filogic/openwrt-sdk-24.10.2-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          - name: x86-64
-            sdk: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
     env:
       PACKAGE_NAME: luci-app-nodemanager
+      OWRT_VER: 24.10.2
+      TARGET: x86
+      SUBTARGET: 64
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install minimal deps
+      - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk unzip zstd rsync file curl
+          sudo apt-get install -y --no-install-recommends zstd rsync
 
-      - name: Download & extract SDK
+      - name: Download & unpack OpenWrt SDK
+        shell: bash
         run: |
           set -euo pipefail
-          curl -fL -o sdk.tar.zst "${{ matrix.target.sdk }}"
+          SDK_URL="https://downloads.openwrt.org/releases/${OWRT_VER}/targets/${TARGET}/${SUBTARGET}/openwrt-sdk-${OWRT_VER}-${TARGET}-${SUBTARGET}_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          echo "SDK_URL=${SDK_URL}"
+          curl -fL -o sdk.tar.zst "${SDK_URL}"
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -I zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk"
-          # 从已解压目录里找顶层 SDK 目录，避免对 tar 做 head 触发 broken pipe
-          SDK_DIR="$(find "$RUNNER_TEMP/sdk" -mindepth 1 -maxdepth 1 -type d -print -quit)"
-          SDK_BASE="$(basename "$SDK_DIR")"
-          echo "SDK_DIR=$SDK_DIR"   >> "$GITHUB_ENV"
+          # 避免 tar|head 在 pipefail 下触发 SIGPIPE
+          tar -I zstd -tf sdk.tar.zst > /tmp/sdk.list
+          SDK_BASE="$(head -1 /tmp/sdk.list | cut -d/ -f1)"
+          SDK_DIR="$RUNNER_TEMP/sdk/$SDK_BASE"
+          echo "SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           echo "SDK_BASE=$SDK_BASE" >> "$GITHUB_ENV"
-          ln -sfn "$SDK_DIR" sdk
+          ln -s "$SDK_DIR" sdk
 
-      - name: Setup feeds (luci only)
+      - name: Sync single-package repo into SDK/package/
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SDK_DIR/package/${PACKAGE_NAME}"
+          # 把当前仓库全部同步到 SDK 的 package/<pkg>/ 下（排除 CI 文件夹）
+          rsync -a --delete --exclude '.git' --exclude '.github' ./ "$SDK_DIR/package/${PACKAGE_NAME}/"
+
+      - name: Prepare feeds & minimal .config
+        shell: bash
         run: |
           set -euo pipefail
           cd "$SDK_DIR"
-          BRANCH="openwrt-24.10"
-          if [ ! -x scripts/feeds ]; then
-            mkdir -p scripts
-            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/feeds" -o scripts/feeds
-            curl -fsSL "https://raw.githubusercontent.com/openwrt/openwrt/${BRANCH}/scripts/metadata.pm" -o scripts/metadata.pm
-            chmod +x scripts/feeds
-          fi
-          echo "src-git luci https://github.com/openwrt/luci.git;openwrt-24.10" > feeds.conf
-          ./scripts/feeds update luci
-          ./scripts/feeds install -p luci luci-base luci-compat
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-      - name: Remove lucihttp to avoid lua toolchain deps
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          rm -rf feeds/luci/contrib/package/lucihttp || true
-
-      - name: Init defconfig
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          : > .config
-          make defconfig
-
-      - name: Prepare package inside SDK (copy only repo, exclude SDK)
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          PKGDIR="$SDK_DIR/package/$PACKAGE_NAME"
-          rm -rf "$PKGDIR"; mkdir -p "$PKGDIR"
-          rsync -a --delete \
-            --exclude '.git' --exclude '.github' \
-            --exclude 'sdk' --exclude 'sdk.tar.zst' \
-            --exclude 'openwrt-sdk-*' \
-            --exclude 'out' \
-            ./ "$PKGDIR/"
-          # flatten if nested
-          if [ ! -f "$PKGDIR/Makefile" ] && [ -f "$PKGDIR/$PACKAGE_NAME/Makefile" ]; then
-            rsync -a "$PKGDIR/$PACKAGE_NAME/" "$PKGDIR/"; rm -rf "$PKGDIR/$PACKAGE_NAME"
-          fi
-          test -f "$PKGDIR/Makefile" || { echo "::error::Makefile not found in $PKGDIR"; exit 1; }
-
-      - name: Build po2lmo (host tool for i18n)
-        run: |
-          set -e
-          cd "$SDK_DIR"
-          make -C feeds/luci/modules/luci-base/src clean po2lmo V=s
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/host/bin/po2lmo
-          install -D -m0755 feeds/luci/modules/luci-base/src/po2lmo staging_dir/hostpkg/bin/po2lmo
-          echo "PATH=$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH" >> "$GITHUB_ENV"
-          echo "PO2LMO=$PWD/staging_dir/hostpkg/bin/po2lmo" >> "$GITHUB_ENV"
-
-      - name: Enable our package in .config
-        run: |
-          set -e
-          cd "$SDK_DIR"
+          # 只构建我们这个包；禁掉会引来 lua.h / ucode 相关编译错误的包
+          rm -f .config
           {
+            echo "CONFIG_TARGET_${TARGET}=y"
+            echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y"
             echo "CONFIG_PACKAGE_${PACKAGE_NAME}=m"
-            echo "CONFIG_LUCI_LANG_en=y"
-            echo "CONFIG_LUCI_LANG_zh_Hans=y"
-          } >> .config
+            # 显式关闭这些可选组件，避免把 liblua / ucode-mod-* / rpcd-mod-luci 等拉进来
+            echo "CONFIG_PACKAGE_liblucihttp-lua=n"
+            echo "CONFIG_PACKAGE_ucode-mod-lua=n"
+            echo "CONFIG_PACKAGE_ucode-mod-html=n"
+            echo "CONFIG_PACKAGE_rpcd-mod-luci=n"
+          } > .config
           make defconfig
-          grep -n "CONFIG_PACKAGE_${PACKAGE_NAME}" .config || { echo "::error::config not effective"; exit 1; }
 
-      - name: Compile ONLY our package (and zh-cn i18n subpkg)
-        env:
-          PO2LMO: ${{ env.PO2LMO }}
+      - name: Build host tools (po2lmo)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           cd "$SDK_DIR"
           export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          # luci-base 的 host-compile 会把 po2lmo/jsmin 装到 hostpkg/bin
+          make -j"$(nproc)" V=s package/feeds/luci/luci-base/host-compile
+
+      - name: Build ${{ env.PACKAGE_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SDK_DIR"
+          export PATH="$PWD/staging_dir/hostpkg/bin:$PWD/staging_dir/host/bin:$PATH"
+          export PO2LMO="$PWD/staging_dir/hostpkg/bin/po2lmo"
           make -j"$(nproc)" V=s package/${PACKAGE_NAME}/compile
 
-      - name: Collect & upload artifacts
+      - name: Collect .ipk artifacts
+        if: always()
+        shell: bash
         run: |
-          set -e
-          cd "$SDK_DIR"
-          OUT="$GITHUB_WORKSPACE/out/${{ matrix.target.name }}"
-          mkdir -p "$OUT"
-          found=0
-          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f -name "${PACKAGE_NAME}_*.ipk" -print0)
-          while IFS= read -r -d '' f; do cp -v "$f" "$OUT/"; found=1; done < <(find bin -type f \( -name "luci-i18n-nodemanager-zh-cn_*.ipk" -o -name "luci-i18n-nodemanager-zh-hans_*.ipk" \) -print0)
-          if [ "$found" -eq 0 ]; then
-            echo "::error::No ipk found under bin/"
-            find bin -type f -name '*.ipk' -print
-            exit 1
-          fi
-          ls -l "$OUT"
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$SDK_DIR/bin" -type f -name "*.ipk" -print -exec cp -v "{}" "$GITHUB_WORKSPACE/artifacts/" \;
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-nodemanager-${{ matrix.target.name }}
-          path: out/${{ matrix.target.name }}
-          if-no-files-found: error
+          name: ipks-${{ env.OWRT_VER }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+          path: artifacts/*.ipk
