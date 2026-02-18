@@ -2,19 +2,26 @@
   "luci-app-nodemanager": {
     "description": "Grant LuCI Node Manager permissions",
     "read": {
+      "uci": [
+        "nodemanager"
+      ],
       "file": {
-        "/etc/nikki/profiles/config.yaml": [ "read" ]
-      },
-      "ubus": {
-        "*": [ "*" ]
+        "/etc/nikki/*": [
+          "read"
+        ],
+        "/usr/share/nodemanager/*": [
+          "read"
+        ]
       }
     },
     "write": {
+      "uci": [
+        "nodemanager"
+      ],
       "file": {
-        "/etc/nikki/profiles/config.yaml": [ "write" ]
-      },
-      "ubus": {
-        "*": [ "*" ]
+        "/etc/nikki/*": [
+          "write"
+        ]
       }
     }
   }

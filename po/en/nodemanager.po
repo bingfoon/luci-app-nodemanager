@@ -1,92 +1,192 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
 msgid "Node Manager"
-msgstr "Node Manager"
+msgstr ""
+
+msgid "Proxy Nodes"
+msgstr ""
 
 msgid "Proxies"
-msgstr "Proxies"
+msgstr ""
 
 msgid "Providers"
-msgstr "Providers"
+msgstr ""
 
 msgid "DNS"
-msgstr "DNS"
-
-msgid "Logs"
-msgstr "Logs"
-
-msgid "Name"
-msgstr "Name"
-
-msgid "Server (IP or Domain)"
-msgstr "Server (IP or Domain)"
-
-msgid "Port"
-msgstr "Port"
-
-msgid "Username"
-msgstr "Username"
-
-msgid "Password"
-msgstr "Password"
-
-msgid "Bind IP (/32)"
-msgstr "Bind IP (/32)"
-
-msgid "Add"
-msgstr "Add"
-
-msgid "Save"
-msgstr "Save"
-
-msgid "Provider Name"
-msgstr "Provider Name"
-
-msgid "Subscribe URL"
-msgstr "Subscribe URL"
-
-msgid "Nameserver (IPv4)"
-msgstr "Nameserver (IPv4)"
-
-msgid "Refresh"
-msgstr "Refresh"
-
-msgid "Fields cannot be empty"
-msgstr "Fields cannot be empty"
-
-msgid "Invalid server at row %d"
-msgstr "Invalid server at row %d"
-
-msgid "Invalid port at row %d"
-msgstr "Invalid port at row %d"
-
-msgid "Invalid bind IP at row %d"
-msgstr "Invalid bind IP at row %d"
-
-msgid "Invalid URL at row %d"
-msgstr "Invalid URL at row %d"
-
-msgid "DNS cannot be empty"
-msgstr "DNS cannot be empty"
-
-msgid "Invalid DNS at row %d"
-msgstr "Invalid DNS at row %d"
-
-msgid "Config file not found: "
-msgstr "Config file not found: "
+msgstr ""
 
 msgid "Settings"
-msgstr "Settings"
+msgstr ""
+
+msgid "Logs"
+msgstr ""
+
+msgid "nikki running"
+msgstr ""
+
+msgid "nikki stopped"
+msgstr ""
+
+msgid "Restart"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Processing..."
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
+msgid "Import"
+msgstr ""
+
+msgid "Export"
+msgstr ""
+
+msgid "Test All"
+msgstr ""
+
+msgid "Save"
+msgstr ""
+
+msgid "Saving..."
+msgstr ""
+
+msgid "Saved successfully"
+msgstr ""
+
+msgid "Save failed"
+msgstr ""
+
+msgid "Network error: "
+msgstr ""
+
+msgid "Delete this row?"
+msgstr ""
+
+msgid "Type"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "Server"
+msgstr ""
+
+msgid "Port"
+msgstr ""
+
+msgid "Username"
+msgstr ""
+
+msgid "Password"
+msgstr ""
+
+msgid "Bind IPs"
+msgstr ""
+
+msgid "Delay"
+msgstr ""
+
+msgid "Action"
+msgstr ""
+
+msgid "Test connectivity"
+msgstr ""
+
+msgid "Timeout"
+msgstr ""
+
+msgid "Error"
+msgstr ""
+
+msgid "Import Proxy Nodes"
+msgstr ""
+
+msgid "Paste proxies here (JSON / YAML / URL / TXT)..."
+msgstr ""
+
+msgid "Append to existing"
+msgstr ""
+
+msgid "Replace existing"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Please paste or select content"
+msgstr ""
+
+msgid "Parsing..."
+msgstr ""
+
+msgid "Imported %d nodes"
+msgstr ""
+
+msgid "Import failed"
+msgstr ""
+
+msgid "Error: "
+msgstr ""
+
+msgid "Paste text or select a file. Format is auto-detected."
+msgstr ""
+
+msgid "nikki is not running"
+msgstr ""
+
+msgid "Proxy Providers"
+msgstr ""
+
+msgid "Provider Name"
+msgstr ""
+
+msgid "Subscription URL"
+msgstr ""
+
+msgid "DNS Servers"
+msgstr ""
+
+msgid "DNS Server IP"
+msgstr ""
 
 msgid "Config file path"
-msgstr "Config file path"
+msgstr ""
 
-msgid "Create the file if missing"
-msgstr "Create the file if missing"
+msgid "Template file path"
+msgstr ""
 
-msgid "Current file:"
-msgstr "Current file:"
+msgid "Used when creating config file. Leave default unless customized."
+msgstr ""
 
-msgid "Path cannot be empty"
-msgstr "Path cannot be empty"
+msgid "Create if missing"
+msgstr ""
 
-msgid "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."
-msgstr "The selected config must contain the anchor comments used by this app. Otherwise, editing will fail."
+msgid "Create config file from template if it does not exist"
+msgstr ""
+
+msgid "Restart nikki"
+msgstr ""
+
+msgid "Service restarted"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Refresh"
+msgstr ""
+
+msgid "Loading..."
+msgstr ""
+
+msgid "No logs found"
+msgstr ""
+
+msgid "Failed to load logs"
+msgstr ""
