@@ -56,13 +56,11 @@ RUN cd "$SDK_DIR" && \
      echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
     cat feeds.conf.default
 
-# 更新 luci feed 并安装 luci-base
+# 更新所有可用 feed（telephony/routing 已被注释） 并安装 luci-base 及依赖
 RUN cd "$SDK_DIR" && \
-    ./scripts/feeds update luci && \
-    ./scripts/feeds install luci-base
-
-# defconfig
-RUN cd "$SDK_DIR" && make defconfig FORCE=1 || true
+    ./scripts/feeds update -a && \
+    ./scripts/feeds install -a && \
+    make defconfig FORCE=1 || true
 
 # 编译 po2lmo 工具
 RUN make -C "$SDK_DIR" V=s FORCE=1 package/feeds/luci/luci-base/host/compile
