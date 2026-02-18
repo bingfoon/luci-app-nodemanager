@@ -47,16 +47,18 @@ RUN mkdir -p /tmp/sdk-dl && cd /tmp/sdk-dl && \
     mv openwrt-sdk-* "$SDK_DIR" && \
     rm -rf /tmp/sdk-dl
 
-# 准备 feeds
+# 准备 feeds（只添加和更新 luci，注释掉不需要的 telephony 等 feed）
 RUN cd "$SDK_DIR" && \
+    sed -i 's/^src-git telephony/#\0/' feeds.conf.default && \
+    sed -i 's/^src-git routing/#\0/' feeds.conf.default && \
     (grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
      echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
-    ./scripts/feeds update -a && \
+    ./scripts/feeds update luci && \
     ./scripts/feeds install luci-base && \
-    make defconfig
+    make defconfig FORCE=1
 
 # 编译 po2lmo 工具
-RUN make -C "$SDK_DIR" V=s package/feeds/luci/luci-base/host/compile
+RUN make -C "$SDK_DIR" V=s FORCE=1 package/feeds/luci/luci-base/host/compile
 
 WORKDIR /build
 DOCKERFILE
@@ -81,7 +83,7 @@ rsync -a --delete --exclude ".git" --exclude ".github" --exclude "dist" \
     /src/ "$SDK_DIR/package/luci-app-nodemanager"/
 
 echo "==> 编译 luci-app-nodemanager..."
-make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-app-nodemanager/compile
+make -C "$SDK_DIR" V=s FORCE=1 -j"$(nproc)" package/luci-app-nodemanager/compile
 
 echo "==> 创建 zh-cn i18n 包..."
 python3 - <<'"'"'PY'"'"'
@@ -141,7 +143,7 @@ print("Wrote", d / "Makefile")
 PY
 
 echo "==> 编译 zh-cn i18n..."
-make -C "$SDK_DIR" V=s -j"$(nproc)" package/luci-i18n-nodemanager-zh-cn/compile
+make -C "$SDK_DIR" V=s FORCE=1 -j"$(nproc)" package/luci-i18n-nodemanager-zh-cn/compile
 
 echo "==> 收集 IPK..."
 find "$SDK_DIR/bin" -type f \( -name "luci-app-nodemanager_*.ipk" -o -name "luci-i18n-nodemanager-zh-cn_*.ipk" \) \
