@@ -49,8 +49,8 @@ RUN mkdir -p /tmp/sdk-dl && cd /tmp/sdk-dl && \
 
 # 准备 feeds
 RUN cd "$SDK_DIR" && \
-    grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
-    echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default && \
+    (grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
+     echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
     ./scripts/feeds update -a && \
     ./scripts/feeds install luci-base && \
     make defconfig
