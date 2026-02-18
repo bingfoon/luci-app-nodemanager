@@ -33,10 +33,11 @@ ENV TERM=dumb
 ENV SDK_DIR=/opt/sdk
 ENV FORCE_UNSAFE_CONFIGURE=1
 
-# 安装编译依赖
+# 安装 SDK 所需的全部编译依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gawk gettext unzip zstd rsync curl ca-certificates \
-    python3 file libncurses-dev && \
+    build-essential gawk gettext unzip zstd rsync curl wget ca-certificates \
+    python3 python3-distutils file libncurses-dev git perl \
+    libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # 下载并解压 OpenWrt SDK（此步被 Docker layer 缓存）
@@ -47,15 +48,21 @@ RUN mkdir -p /tmp/sdk-dl && cd /tmp/sdk-dl && \
     mv openwrt-sdk-* "$SDK_DIR" && \
     rm -rf /tmp/sdk-dl
 
-# 准备 feeds（只添加和更新 luci，注释掉不需要的 telephony 等 feed）
+# 修改 feeds.conf：注释掉不需要的 feed，确保 luci feed 存在
 RUN cd "$SDK_DIR" && \
-    sed -i 's/^src-git telephony/#\0/' feeds.conf.default && \
-    sed -i 's/^src-git routing/#\0/' feeds.conf.default && \
+    sed -i '/^src-git.\+telephony/s/^/#/' feeds.conf.default && \
+    sed -i '/^src-git.\+routing/s/^/#/' feeds.conf.default && \
     (grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
      echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
+    cat feeds.conf.default
+
+# 更新 luci feed 并安装 luci-base
+RUN cd "$SDK_DIR" && \
     ./scripts/feeds update luci && \
-    ./scripts/feeds install luci-base && \
-    make defconfig FORCE=1
+    ./scripts/feeds install luci-base
+
+# defconfig
+RUN cd "$SDK_DIR" && make defconfig FORCE=1 || true
 
 # 编译 po2lmo 工具
 RUN make -C "$SDK_DIR" V=s FORCE=1 package/feeds/luci/luci-base/host/compile
