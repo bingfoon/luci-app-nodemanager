@@ -90,7 +90,7 @@ rsync -a --delete --exclude ".git" --exclude ".github" --exclude "dist" \
     /src/ "$SDK_DIR/package/luci-app-nodemanager"/
 
 echo "==> 编译 luci-app-nodemanager..."
-make -C "$SDK_DIR" V=s FORCE=1 -j"$(nproc)" package/luci-app-nodemanager/compile
+make -C "$SDK_DIR" V=s FORCE=1 -j1 package/luci-app-nodemanager/compile
 
 echo "==> 创建 zh-cn i18n 包..."
 python3 - <<'"'"'PY'"'"'
