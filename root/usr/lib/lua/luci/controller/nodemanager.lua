@@ -120,6 +120,20 @@ local function conf_path()
 	return "/etc/nikki/profiles/config.yaml"
 end
 
+local NM_PROVIDER_NAME = "nm-nodes"
+local NM_GROUP_NAME = "\240\159\143\160住宅节点"
+
+local function nm_provider_path()
+	local dir = conf_path():match("^(.+)/[^/]+$") or "/etc/nikki/profiles"
+	return dir .. "/nm_proxies.yaml"
+end
+
+-- Relative path for mihomo HomeDir constraint
+local function nm_provider_relpath()
+	local abs = nm_provider_path()
+	local rel = abs:match("/etc/nikki/(.+)")
+	return rel or abs
+end
 
 local SAFE_PREFIXES = {"/etc/nikki/", "/tmp/", "/usr/share/nodemanager/"}
 
@@ -159,16 +173,14 @@ end
 -- ============================================================
 local SCHEMAS = {
 	socks5 = {
-		anchor = "s5",
 		required = {"username", "password"},
 		output = function(p)
 			return string.format(
-				'  - {<<: *s5, name: "%s", server: "%s", port: %s, username: "%s", password: "%s"}',
+				'  - {name: "%s", type: socks5, server: "%s", port: %s, username: "%s", password: "%s"}',
 				p.name, p.server, p.port, p.username or "", p.password or "")
 		end
 	},
 	http = {
-		anchor = nil,
 		required = {},
 		output = function(p)
 			local base = string.format('  - {name: "%s", type: http, server: "%s", port: %s',
@@ -442,22 +454,143 @@ local function save_rules_to_lines(list, lines)
 	return result
 end
 
-local NM_GROUP_NAME = "\240\159\143\160住宅节点"
+-- Write managed proxies to separate provider file (no YAML anchors)
+local function write_provider_file(list)
+	local path = nm_provider_path()
+	local dir = path:match("^(.+)/[^/]+$") or "/"
+	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
+	local content = {}
+	if #list == 0 then
+		table.insert(content, "proxies: []")
+	else
+		table.insert(content, "proxies:")
+		for _, p in ipairs(list) do
+			local schema = SCHEMAS[p.type or "socks5"] or SCHEMAS.socks5
+			table.insert(content, schema.output(p))
+		end
+	end
+	return fs.writefile(path, table.concat(content, "\n") .. "\n")
+end
 
-local function save_proxy_group_to_lines(list, lines)
-	-- Build the group entry
-	local names = {}
-	for _, p in ipairs(list) do
-		table.insert(names, p.name)
+-- Read proxies from provider file
+local function read_provider_proxies()
+	local path = nm_provider_path()
+	local content = fs.readfile(path)
+	if not content then return {} end
+	local lines = {}
+	for line in content:gmatch("[^\n]*") do table.insert(lines, line) end
+	-- Reuse parse_proxies logic on these lines (provider file has proxies: header)
+	local proxies = {}
+	local in_block = false
+	for _, line in ipairs(lines) do
+		if line:match("^proxies:") then
+			in_block = true
+		elseif in_block and line:match("^%S") then
+			break
+		elseif in_block and line:match("^%s*-%s*{") then
+			local ptype = detect_managed_type(line)
+			if ptype then
+				local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
+				local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
+				local port     = line:match("port:%s*(%d+)")
+				local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
+				local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
+				if name and server and port then
+					table.insert(proxies, {
+						name     = trim(name),
+						type     = trim(ptype),
+						server   = trim(server),
+						port     = tonumber(port),
+						username = trim(username or ""),
+						password = trim(password or ""),
+					})
+				end
+			end
+		end
+	end
+	return proxies
+end
+
+-- Parse dialer-proxy from YAML anchor definition (e.g. s5: &s5 ... dialer-proxy: xxx)
+local function parse_dialer_proxy(lines)
+	local in_anchor = false
+	for _, line in ipairs(lines) do
+		if line:match("^s5:%s*&s5") or line:match("^s5:%s*$") then
+			in_anchor = true
+		elseif in_anchor then
+			if line:match("^%S") and not line:match("^%s") then break end
+			local dp = line:match("dialer%-proxy:%s*(.+)")
+			if dp then return trim(dp) end
+		end
+	end
+	return nil
+end
+
+-- Ensure proxy-providers: has nm-nodes entry with override.dialer-proxy
+local function save_provider_entry_to_lines(lines, dialer_proxy)
+	local entry_lines = {}
+	table.insert(entry_lines, string.format('  %s:', NM_PROVIDER_NAME))
+	table.insert(entry_lines, '    type: file')
+	table.insert(entry_lines, string.format('    path: %s', nm_provider_relpath()))
+	if dialer_proxy and dialer_proxy ~= "" then
+		table.insert(entry_lines, '    override:')
+		table.insert(entry_lines, string.format('      dialer-proxy: "%s"', dialer_proxy))
+	end
+	table.insert(entry_lines, '    health-check:')
+	table.insert(entry_lines, '      enable: false')
+
+	-- Find proxy-providers: section
+	local section_start, section_end
+	for i, line in ipairs(lines) do
+		if line:match("^proxy%-providers:") then
+			section_start = i
+		elseif section_start and not section_end and line:match("^%S") then
+			section_end = i - 1
+		end
 	end
 
+	if not section_start then
+		-- Create section
+		table.insert(lines, "")
+		table.insert(lines, "proxy-providers:")
+		for _, el in ipairs(entry_lines) do table.insert(lines, el) end
+		return lines
+	end
+	if not section_end then section_end = #lines end
+
+	-- Find existing nm-nodes entry
+	local ent_start, ent_end
+	for i = section_start + 1, section_end do
+		if lines[i]:match("^%s+" .. NM_PROVIDER_NAME .. ":") then
+			ent_start = i
+		elseif ent_start and not ent_end then
+			if lines[i]:match("^%s%s%S") and not lines[i]:match("^%s%s%s%s") then
+				ent_end = i - 1
+			end
+		end
+	end
+	if ent_start and not ent_end then ent_end = section_end end
+
+	local result = {}
+	if ent_start then
+		for i = 1, ent_start - 1 do table.insert(result, lines[i]) end
+		for _, el in ipairs(entry_lines) do table.insert(result, el) end
+		for i = ent_end + 1, #lines do table.insert(result, lines[i]) end
+	else
+		for i = 1, section_end do table.insert(result, lines[i]) end
+		for _, el in ipairs(entry_lines) do table.insert(result, el) end
+		for i = section_end + 1, #lines do table.insert(result, lines[i]) end
+	end
+	return result
+end
+
+-- Save proxy group with use: [nm-nodes]
+local function save_proxy_group_to_lines(lines)
 	local group_lines = {}
 	table.insert(group_lines, string.format('  - name: "%s"', NM_GROUP_NAME))
 	table.insert(group_lines, '    type: select')
-	table.insert(group_lines, '    proxies:')
-	for _, n in ipairs(names) do
-		table.insert(group_lines, string.format('      - "%s"', n))
-	end
+	table.insert(group_lines, '    use:')
+	table.insert(group_lines, string.format('      - %s', NM_PROVIDER_NAME))
 
 	-- Find proxy-groups: section
 	local section_start, section_end
@@ -470,7 +603,6 @@ local function save_proxy_group_to_lines(list, lines)
 	end
 
 	if not section_start then
-		-- No proxy-groups section, create one
 		table.insert(lines, "")
 		table.insert(lines, "proxy-groups:")
 		for _, gl in ipairs(group_lines) do table.insert(lines, gl) end
@@ -478,14 +610,14 @@ local function save_proxy_group_to_lines(list, lines)
 	end
 	if not section_end then section_end = #lines end
 
-	-- Find existing group with our name and its line range
+	-- Find existing group
 	local grp_start, grp_end
+	local escaped_name = NM_GROUP_NAME:gsub("([%%%.%+%-%*%?%[%^%$%(%)%{%}])", "%%%1")
 	for i = section_start + 1, section_end do
 		local line = lines[i]
-		if line:match(NM_GROUP_NAME:gsub("([%%%.%+%-%*%?%[%^%$%(%)%{%}])", "%%%1")) then
+		if line:match(escaped_name) then
 			grp_start = i
 		elseif grp_start and not grp_end then
-			-- Next group starts at '  - name:' or end of section
 			if line:match("^%s+%-%s+name:") or (i == section_end and not line:match("^%s")) then
 				grp_end = i - 1
 			end
@@ -495,12 +627,10 @@ local function save_proxy_group_to_lines(list, lines)
 
 	local result = {}
 	if grp_start then
-		-- Replace existing group
 		for i = 1, grp_start - 1 do table.insert(result, lines[i]) end
 		for _, gl in ipairs(group_lines) do table.insert(result, gl) end
 		for i = grp_end + 1, #lines do table.insert(result, lines[i]) end
 	else
-		-- Append at end of proxy-groups section
 		for i = 1, section_end do table.insert(result, lines[i]) end
 		for _, gl in ipairs(group_lines) do table.insert(result, gl) end
 		for i = section_end + 1, #lines do table.insert(result, lines[i]) end
@@ -784,7 +914,11 @@ end
 -- ============================================================
 HANDLERS["load"] = function()
 	local lines = read_lines()
-	local proxies = parse_proxies(lines)
+	-- Read proxies: prefer provider file, fallback to main config (migration)
+	local proxies = read_provider_proxies()
+	if #proxies == 0 then
+		proxies = parse_proxies(lines)
+	end
 	local bindmap = parse_bindmap(lines)
 	for _, p in ipairs(proxies) do
 		p.bindips = bindmap[p.name] or {}
@@ -816,7 +950,10 @@ HANDLERS["save_proxies"] = function()
 	-- Auto-fill empty names + dedup against existing config
 	local lines = read_lines()
 	local reserved = parse_all_proxy_names(lines)
-	-- Remove names of our managed types from reserved (we're replacing them)
+	-- Also remove provider proxy names from reserved
+	local old_provider = read_provider_proxies()
+	for _, p in ipairs(old_provider) do reserved[p.name] = nil end
+	-- Also remove inline managed from reserved (migration)
 	local managed = parse_proxies(lines)
 	for _, p in ipairs(managed) do reserved[p.name] = nil end
 	normalize_names(list, reserved)
@@ -827,10 +964,18 @@ HANDLERS["save_proxies"] = function()
 			return json_out({ok = false, err = string.format("Row %d: %s", i, err)})
 		end
 	end
-	-- Save
-	lines = save_proxies_to_lines(list, lines)
+	-- 1. Write provider file (separate file)
+	write_provider_file(list)
+	-- 2. Clean inline managed proxies from main config
+	lines = save_proxies_to_lines({}, lines)
+	-- 3. Parse dialer-proxy from anchor definition
+	local dialer = parse_dialer_proxy(lines)
+	-- 4. Ensure proxy-providers entry
+	lines = save_provider_entry_to_lines(lines, dialer)
+	-- 5. Update proxy group
+	lines = save_proxy_group_to_lines(lines)
+	-- 6. SRC-IP rules
 	lines = save_rules_to_lines(list, lines)
-	lines = save_proxy_group_to_lines(list, lines)
 	if write_lines(lines) then
 		json_out({ok = true})
 	else
