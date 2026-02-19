@@ -96,8 +96,27 @@ local function conf_path()
 		local candidate = "/etc/nikki/profiles/" .. p .. ".yaml"
 		if fs.access(candidate) then return candidate end
 	end
+	-- 4. Scan /etc/nikki/profiles/ for most recently modified .yaml
+	local dir = "/etc/nikki/profiles/"
+	if fs.access(dir) then
+		local entries = fs.dir(dir)
+		if entries then
+			local best, best_mtime = nil, 0
+			for entry in entries do
+				if entry:match("%.ya?ml$") then
+					local st = fs.stat(dir .. entry)
+					local mt = st and st.mtime or 0
+					if mt > best_mtime then
+						best_mtime = mt
+						best = dir .. entry
+					end
+				end
+			end
+			if best then return best end
+		end
+	end
 
-	-- 4. Default fallback
+	-- 5. Default fallback
 	return "/etc/nikki/profiles/config.yaml"
 end
 
