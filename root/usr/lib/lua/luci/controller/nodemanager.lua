@@ -277,23 +277,28 @@ local function parse_dns_servers(lines)
 		elseif in_dns and line:match("^%S") then
 			break  -- left dns block
 		elseif in_dns then
-			-- Try to match a known key header
-			local found_key = false
-			for _, k in ipairs(DNS_KEYS) do
-				local pat = "^%s+" .. k:gsub("%-", "%%-") .. ":"
-				if line:match(pat) then
-					cur_key = k
-					found_key = true
-					break
+			-- Skip blank lines (config may have empty lines between key and values)
+			if line:match("^%s*$") then
+				-- do nothing, keep cur_key
+			else
+				-- Try to match a known key header
+				local found_key = false
+				for _, k in ipairs(DNS_KEYS) do
+					local pat = "^%s+" .. k:gsub("%-", "%%-") .. ":"
+					if line:match(pat) then
+						cur_key = k
+						found_key = true
+						break
+					end
 				end
-			end
-			if not found_key and cur_key then
-				local val = line:match("^%s+%-%s+(.+)")
-				if val then
-					table.insert(result[cur_key], trim(val))
-				elseif not line:match("^%s+%-") then
-					-- Not a list item → this key's block ended
-					cur_key = nil
+				if not found_key and cur_key then
+					local val = line:match("^%s+%-%s+(.+)")
+					if val then
+						table.insert(result[cur_key], trim(val))
+					elseif not line:match("^%s+%-") then
+						-- Not a list item → this key's block ended
+						cur_key = nil
+					end
 				end
 			end
 		end
