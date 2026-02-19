@@ -53,7 +53,7 @@ mkdir -p "$OUTPUT_DIR"
 rm -f "$OUTPUT_DIR/${PKG_NAME}_"*.ipk
 
 python3 - "$DATA" "$OUTPUT_DIR/${PKG_NAME}_${PKG_VERSION}_all.ipk" "$PKG_NAME" "$PKG_VERSION" <<'PYTHON'
-import sys, os, io, tarfile, struct, time, gzip
+import sys, os, io, tarfile, time
 
 data_dir, output_path, pkg_name, pkg_version = sys.argv[1:5]
 
@@ -63,7 +63,6 @@ def make_tar_gz(base_dir=None, files_dict=None):
     with tarfile.open(fileobj=buf, mode='w:gz', format=tarfile.GNU_FORMAT) as tar:
         if base_dir:
             for root, dirs, files in os.walk(base_dir):
-                # Add directory
                 arcname = './' + os.path.relpath(root, base_dir)
                 if arcname == './.':
                     arcname = './'
@@ -74,7 +73,6 @@ def make_tar_gz(base_dir=None, files_dict=None):
                 info.mode = 0o755
                 info.mtime = time.time()
                 tar.addfile(info)
-                # Add files
                 for fname in sorted(files):
                     full = os.path.join(root, fname)
                     arcname = './' + os.path.relpath(full, base_dir)
@@ -88,21 +86,6 @@ def make_tar_gz(base_dir=None, files_dict=None):
                 info.mtime = time.time()
                 tar.addfile(info, io.BytesIO(data))
     return buf.getvalue()
-
-def make_ar(output_path, members):
-    """Create a GNU ar archive."""
-    with open(output_path, 'wb') as f:
-        f.write(b'!<arch>\n')
-        for name, data in members:
-            # AR header: name/16 mtime/12 uid/6 gid/6 mode/8 size/10 end/2
-            name_bytes = name.encode('utf-8')
-            header = b'%-16s%-12s%-6s%-6s%-8s%-10s\x60\n' % (
-                name_bytes, b'0', b'0', b'0', b'100644', str(len(data)).encode()
-            )
-            f.write(header)
-            f.write(data)
-            if len(data) % 2:
-                f.write(b'\n')
 
 # Calculate installed size
 total_size = sum(
@@ -137,7 +120,7 @@ prerm = """#!/bin/sh
 exit 0
 """
 
-# Create tar.gz archives
+# Create inner tar.gz archives
 control_tar_gz = make_tar_gz(files_dict={
     'control': control,
     'postinst': postinst,
@@ -145,12 +128,30 @@ control_tar_gz = make_tar_gz(files_dict={
 })
 data_tar_gz = make_tar_gz(base_dir=data_dir)
 
-# Assemble IPK (ar archive)
-make_ar(output_path, [
-    ('debian-binary', b'2.0\n'),
-    ('control.tar.gz', control_tar_gz),
-    ('data.tar.gz', data_tar_gz),
-])
+# Assemble IPK: outer tar.gz (original ipkg/opkg format)
+# NOT ar! OpenWrt/ImmortalWrt uses tar.gz outer format.
+with tarfile.open(output_path, 'w:gz', format=tarfile.GNU_FORMAT) as ipk:
+    # 1. debian-binary
+    db_data = b'2.0\n'
+    db_info = tarfile.TarInfo(name='./debian-binary')
+    db_info.size = len(db_data)
+    db_info.mode = 0o644
+    db_info.mtime = time.time()
+    ipk.addfile(db_info, io.BytesIO(db_data))
+
+    # 2. control.tar.gz
+    ctrl_info = tarfile.TarInfo(name='./control.tar.gz')
+    ctrl_info.size = len(control_tar_gz)
+    ctrl_info.mode = 0o644
+    ctrl_info.mtime = time.time()
+    ipk.addfile(ctrl_info, io.BytesIO(control_tar_gz))
+
+    # 3. data.tar.gz
+    data_info = tarfile.TarInfo(name='./data.tar.gz')
+    data_info.size = len(data_tar_gz)
+    data_info.mode = 0o644
+    data_info.mtime = time.time()
+    ipk.addfile(data_info, io.BytesIO(data_tar_gz))
 
 print(f"  📦 安装大小: {total_size} bytes")
 print(f"  📦 IPK 大小: {os.path.getsize(output_path)} bytes")
