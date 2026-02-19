@@ -8,6 +8,8 @@ return view.extend({
 	proxies: [],
 	status: null,
 	schemas: {},
+	currentPage: 1,
+	pageSize: 50,
 
 	load: function() {
 		return nm.call('load').then(function(resp) {
@@ -25,9 +27,11 @@ return view.extend({
 			E('h2', {}, _('Proxy Nodes')),
 			nm.renderStatusBar(self.status),
 			self.renderToolbar(),
-			self.renderTable()
+			self.renderTable(),
+			self.renderPagination()
 		]);
 
+		self.refreshPage();
 		return view;
 	},
 
@@ -36,7 +40,7 @@ return view.extend({
 		var running = self.status && self.status.running;
 
 		return E('div', {
-			'style': 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;'
+			'style': 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;'
 		}, [
 			E('button', {
 				'class': 'cbi-button cbi-button-add',
@@ -66,13 +70,11 @@ return view.extend({
 
 	renderTable: function() {
 		var self = this;
-		var running = self.status && self.status.running;
 
 		var iStyle = 'width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;';
 
 		var thead = E('tr', {'class': 'tr table-titles'}, [
 			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
-			E('th', {'class': 'th', 'style': 'width:60px'}, _('Type')),
 			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
 			E('th', {'class': 'th', 'style': 'width:130px'}, _('Server')),
 			E('th', {'class': 'th', 'style': 'width:65px'}, _('Port')),
@@ -85,6 +87,7 @@ return view.extend({
 
 		var tbody = E('tbody', {'id': 'nm-proxy-body'});
 
+		var running = self.status && self.status.running;
 		for (var i = 0; i < self.proxies.length; i++) {
 			tbody.appendChild(self.createRow(self.proxies[i], running));
 		}
@@ -101,20 +104,75 @@ return view.extend({
 		]);
 	},
 
+	// ── Pagination ──────────────────────────────────
+	renderPagination: function() {
+		var self = this;
+
+		var pageSizeSelect = E('select', {
+			'id': 'nm-page-size',
+			'style': 'margin:0 8px;',
+			'change': function(ev) {
+				self.pageSize = parseInt(ev.target.value, 10);
+				self.currentPage = 1;
+				self.refreshPage();
+			}
+		}, [10, 20, 50, 100].map(function(n) {
+			return E('option', {'value': n, 'selected': n === self.pageSize ? '' : null}, n + _(' / page'));
+		}));
+
+		return E('div', {
+			'id': 'nm-pagination',
+			'style': 'display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding:8px 0;'
+		}, [
+			E('button', {
+				'class': 'cbi-button',
+				'id': 'nm-page-prev',
+				'style': 'padding:2px 10px;',
+				'click': function() { self.currentPage--; self.refreshPage(); }
+			}, '◀'),
+			E('span', {'id': 'nm-page-info', 'style': 'font-size:13px;min-width:80px;text-align:center;'}, ''),
+			E('button', {
+				'class': 'cbi-button',
+				'id': 'nm-page-next',
+				'style': 'padding:2px 10px;',
+				'click': function() { self.currentPage++; self.refreshPage(); }
+			}, '▶'),
+			pageSizeSelect
+		]);
+	},
+
+	refreshPage: function() {
+		var tbody = document.getElementById('nm-proxy-body');
+		if (!tbody) return;
+
+		var rows = tbody.querySelectorAll('tr');
+		var total = rows.length;
+		var totalPages = Math.max(1, Math.ceil(total / this.pageSize));
+
+		if (this.currentPage > totalPages) this.currentPage = totalPages;
+		if (this.currentPage < 1) this.currentPage = 1;
+
+		var start = (this.currentPage - 1) * this.pageSize;
+		var end = start + this.pageSize;
+
+		for (var i = 0; i < rows.length; i++) {
+			rows[i].style.display = (i >= start && i < end) ? '' : 'none';
+		}
+
+		var info = document.getElementById('nm-page-info');
+		if (info) info.textContent = this.currentPage + ' / ' + totalPages + ' (' + total + ')';
+
+		var prev = document.getElementById('nm-page-prev');
+		var next = document.getElementById('nm-page-next');
+		if (prev) prev.disabled = this.currentPage <= 1;
+		if (next) next.disabled = this.currentPage >= totalPages;
+	},
+
 	createRow: function(p, running) {
 		var self = this;
 		p = p || {name: '', type: 'socks5', server: '', port: '', username: '', password: '', bindips: []};
 
 		var iS = 'width:100%;box-sizing:border-box;';
-
-		var typeSelect = E('select', {
-			'class': 'cbi-input-select',
-			'data-field': 'type',
-			'style': iS
-		}, [
-			E('option', {'value': 'socks5', 'selected': p.type === 'socks5' ? '' : null}, 's5'),
-			E('option', {'value': 'http', 'selected': p.type === 'http' ? '' : null}, 'http')
-		]);
 
 		var passInput = E('input', {
 			'class': 'cbi-input-text',
@@ -151,15 +209,18 @@ return view.extend({
 			'click': function(ev) {
 				if (confirm(_('Delete this row?'))) {
 					ev.target.closest('tr').remove();
+					self.refreshPage();
 				}
 			}
 		}, '✕');
 
 		var tdS = 'overflow:hidden;text-overflow:ellipsis;';
 
+		// Hidden type field to preserve the value
+		var typeHidden = E('input', {'type': 'hidden', 'data-field': 'type', 'value': p.type || 'socks5'});
+
 		return E('tr', {'class': 'tr', 'draggable': 'true'}, [
-			E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;'}, '☰'),
-			E('td', {'class': 'td', 'style': tdS}, [typeSelect]),
+			E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;'}, ['☰', typeHidden]),
 			E('td', {'class': 'td', 'style': tdS}, [
 				E('input', {'class': 'cbi-input-text', 'data-field': 'name', 'value': p.name, 'style': iS, 'required': ''})
 			]),
@@ -186,6 +247,10 @@ return view.extend({
 		var running = this.status && this.status.running;
 		var tr = this.createRow(null, running);
 		tbody.appendChild(tr);
+		// Jump to last page
+		var total = tbody.querySelectorAll('tr').length;
+		this.currentPage = Math.ceil(total / this.pageSize);
+		this.refreshPage();
 		tr.querySelector('[data-field="name"]').focus();
 	},
 
@@ -319,6 +384,8 @@ return view.extend({
 		for (var i = 0; i < nodes.length; i++) {
 			tbody.appendChild(this.createRow(nodes[i], running));
 		}
+		this.currentPage = 1;
+		this.refreshPage();
 	},
 
 	// ── Export ──────────────────────────────────────
