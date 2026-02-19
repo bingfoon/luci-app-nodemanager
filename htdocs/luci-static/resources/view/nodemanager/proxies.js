@@ -76,11 +76,11 @@ return view.extend({
 		var thead = E('tr', {'class': 'tr table-titles'}, [
 			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
 			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
-			E('th', {'class': 'th', 'style': 'width:130px'}, _('Server')),
+			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Server')),
 			E('th', {'class': 'th', 'style': 'width:65px'}, _('Port')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Username')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Password')),
-			E('th', {'class': 'th', 'style': 'width:130px'}, _('Bind IPs')),
+			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Bind IPs')),
 			E('th', {'class': 'th', 'style': 'width:45px'}, _('Delay')),
 			E('th', {'class': 'th', 'style': 'width:50px'}, _('Action'))
 		]);
@@ -219,8 +219,17 @@ return view.extend({
 		// Hidden type field to preserve the value
 		var typeHidden = E('input', {'type': 'hidden', 'data-field': 'type', 'value': p.type || 'socks5'});
 
-		return E('tr', {'class': 'tr', 'draggable': 'true'}, [
-			E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;'}, ['☰', typeHidden]),
+		var dragHandle = E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;user-select:none;'}, ['☰', typeHidden]);
+		// Only the ☰ handle triggers drag, not the entire row (so inputs remain selectable)
+		dragHandle.addEventListener('mousedown', function() {
+			this.closest('tr').setAttribute('draggable', 'true');
+		});
+		dragHandle.addEventListener('mouseup', function() {
+			this.closest('tr').removeAttribute('draggable');
+		});
+
+		return E('tr', {'class': 'tr'}, [
+			dragHandle,
 			E('td', {'class': 'td', 'style': tdS}, [
 				E('input', {'class': 'cbi-input-text', 'data-field': 'name', 'value': p.name, 'style': iS, 'required': ''})
 			]),
