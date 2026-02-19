@@ -91,7 +91,7 @@ return view.extend({
 			resultSpan,
 			E('button', {
 				'class': 'cbi-button',
-				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
+				'style': 'width:24px;height:24px;padding:0;font-size:12px;line-height:24px;text-align:center;flex-shrink:0;',
 				'title': _('Test DNS'),
 				'click': function(ev) {
 					var btn = ev.target;
@@ -122,7 +122,7 @@ return view.extend({
 			}, '⚡'),
 			E('button', {
 				'class': 'cbi-button cbi-button-remove',
-				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
+				'style': 'width:24px;height:24px;padding:0;font-size:12px;line-height:24px;text-align:center;flex-shrink:0;',
 				'click': function(ev) {
 					ev.target.closest('div[style]').remove();
 				}
