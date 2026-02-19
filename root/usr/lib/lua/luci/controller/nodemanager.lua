@@ -72,13 +72,39 @@ local function uci_cursor()
 end
 
 local function conf_path()
+	-- 1. Check UCI nodemanager override
 	local c = uci_cursor()
-	return c:get_first("nodemanager", "main", "path") or "/etc/nikki/profiles/config.yaml"
+	local p = c:get_first("nodemanager", "main", "path")
+	if p and p ~= "" and fs.access(p) then return p end
+
+	-- 2. Check nikki UCI for active profile
+	local ok_nikki, _ = pcall(function()
+		p = c:get("nikki", "mixin", "profile_name")
+	end)
+	if ok_nikki and p and p ~= "" then
+		local candidate = "/etc/nikki/profiles/" .. p .. ".yaml"
+		if fs.access(candidate) then return candidate end
+	end
+
+	-- 3. Scan /etc/nikki/profiles/ for first .yaml file
+	local dir = "/etc/nikki/profiles/"
+	if fs.access(dir) then
+		local entries = fs.dir(dir)
+		if entries then
+			for entry in entries do
+				if entry:match("%.ya?ml$") then
+					return dir .. entry
+				end
+			end
+		end
+	end
+
+	-- 4. Default fallback
+	return "/etc/nikki/profiles/config.yaml"
 end
 
 local function tpl_path()
-	local c = uci_cursor()
-	return c:get_first("nodemanager", "main", "template") or "/usr/share/nodemanager/config.template.yaml"
+	return "/usr/share/nodemanager/config.template.yaml"
 end
 
 local SAFE_PREFIXES = {"/etc/nikki/", "/tmp/", "/usr/share/nodemanager/"}
@@ -844,31 +870,8 @@ HANDLERS["save_dns"] = function()
 	end
 end
 
-HANDLERS["save_settings"] = function()
-	local input = json_in()
-	local path = input.path
-	local template = input.template
-	if path then
-		if not is_safe_path(path) then
-			return json_out({ok = false, err = "Path not allowed"})
-		end
-		local c = uci_cursor()
-		c:set("nodemanager", c:get_first("nodemanager", "main") or "main", "path", path)
-		c:commit("nodemanager")
-	end
-	if template and template ~= "" then
-		local c = uci_cursor()
-		c:set("nodemanager", c:get_first("nodemanager", "main") or "main", "template", template)
-		c:commit("nodemanager")
-	end
-	if input.create_if_missing then
-		local ok, err = ensure_file()
-		if not ok then
-			return json_out({ok = false, err = err or "Failed to create config"})
-		end
-	end
-	json_out({ok = true})
-end
+
+
 
 HANDLERS["import"] = function()
 	local input = json_in()

@@ -88,6 +88,7 @@ return view.extend({
 				'placeholder': placeholder,
 				'style': 'width:50%;box-sizing:border-box;padding:3px 6px;font-size:13px;'
 			}),
+			resultSpan,
 			E('button', {
 				'class': 'cbi-button',
 				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
@@ -119,7 +120,6 @@ return view.extend({
 						.finally(function() { btn.disabled = false; });
 				}
 			}, '⚡'),
-			resultSpan,
 			E('button', {
 				'class': 'cbi-button cbi-button-remove',
 				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
