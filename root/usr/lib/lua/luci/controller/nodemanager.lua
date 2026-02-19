@@ -442,6 +442,72 @@ local function save_rules_to_lines(list, lines)
 	return result
 end
 
+local NM_GROUP_NAME = "\240\159\143\160住宅节点"
+
+local function save_proxy_group_to_lines(list, lines)
+	-- Build the group entry
+	local names = {}
+	for _, p in ipairs(list) do
+		table.insert(names, p.name)
+	end
+
+	local group_lines = {}
+	table.insert(group_lines, string.format('  - name: "%s"', NM_GROUP_NAME))
+	table.insert(group_lines, '    type: select')
+	table.insert(group_lines, '    proxies:')
+	for _, n in ipairs(names) do
+		table.insert(group_lines, string.format('      - "%s"', n))
+	end
+
+	-- Find proxy-groups: section
+	local section_start, section_end
+	for i, line in ipairs(lines) do
+		if line:match("^proxy%-groups:") then
+			section_start = i
+		elseif section_start and not section_end and line:match("^%S") then
+			section_end = i - 1
+		end
+	end
+
+	if not section_start then
+		-- No proxy-groups section, create one
+		table.insert(lines, "")
+		table.insert(lines, "proxy-groups:")
+		for _, gl in ipairs(group_lines) do table.insert(lines, gl) end
+		return lines
+	end
+	if not section_end then section_end = #lines end
+
+	-- Find existing group with our name and its line range
+	local grp_start, grp_end
+	for i = section_start + 1, section_end do
+		local line = lines[i]
+		if line:match(NM_GROUP_NAME:gsub("([%%%.%+%-%*%?%[%^%$%(%)%{%}])", "%%%1")) then
+			grp_start = i
+		elseif grp_start and not grp_end then
+			-- Next group starts at '  - name:' or end of section
+			if line:match("^%s+%-%s+name:") or (i == section_end and not line:match("^%s")) then
+				grp_end = i - 1
+			end
+		end
+	end
+	if grp_start and not grp_end then grp_end = section_end end
+
+	local result = {}
+	if grp_start then
+		-- Replace existing group
+		for i = 1, grp_start - 1 do table.insert(result, lines[i]) end
+		for _, gl in ipairs(group_lines) do table.insert(result, gl) end
+		for i = grp_end + 1, #lines do table.insert(result, lines[i]) end
+	else
+		-- Append at end of proxy-groups section
+		for i = 1, section_end do table.insert(result, lines[i]) end
+		for _, gl in ipairs(group_lines) do table.insert(result, gl) end
+		for i = section_end + 1, #lines do table.insert(result, lines[i]) end
+	end
+	return result
+end
+
 local function save_providers_to_lines(list, lines)
 	local result = {}
 	local in_section = false
@@ -764,6 +830,7 @@ HANDLERS["save_proxies"] = function()
 	-- Save
 	lines = save_proxies_to_lines(list, lines)
 	lines = save_rules_to_lines(list, lines)
+	lines = save_proxy_group_to_lines(list, lines)
 	if write_lines(lines) then
 		json_out({ok = true})
 	else
