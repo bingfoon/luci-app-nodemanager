@@ -179,6 +179,42 @@ local function parse_proxies(lines)
 	return proxies
 end
 
+-- Extract ALL proxy names from config (including unsupported types)
+local function parse_all_proxy_names(lines)
+	local names = {}
+	local in_block = false
+	for _, line in ipairs(lines) do
+		if line:match("^proxies:") then in_block = true
+		elseif in_block then
+			if line:match("^%S") and not line:match("^%s") then break end
+			local name = line:match('name:%s*"([^"]*)"') or line:match('name:%s*([^,}]+)')
+			if name then names[trim(name)] = true end
+		end
+	end
+	return names
+end
+
+-- Fill empty names + global dedup (avoids collision with vless/vmess etc.)
+local function normalize_names(list, reserved)
+	local used = {}
+	for name in pairs(reserved or {}) do used[name] = 1 end
+	-- First pass: fill empty names
+	for _, p in ipairs(list) do
+		if not p.name or trim(p.name) == "" then
+			p.name = (p.server or "node") .. ":" .. (p.port or 0)
+		end
+	end
+	-- Second pass: dedup
+	for _, p in ipairs(list) do
+		local base = p.name
+		while used[p.name] do
+			used[p.name] = used[p.name] + 1
+			p.name = base .. "-" .. used[p.name]
+		end
+		used[p.name] = 1
+	end
+end
+
 local function parse_bindmap(lines)
 	local map = {}
 	local in_rules = false
@@ -618,20 +654,21 @@ HANDLERS["save_proxies"] = function()
 	if type(list) ~= "table" then
 		return json_out({ok = false, err = "Invalid data"})
 	end
+	-- Auto-fill empty names + dedup against existing config
+	local lines = read_lines()
+	local reserved = parse_all_proxy_names(lines)
+	-- Remove names of our managed types from reserved (we're replacing them)
+	local managed = parse_proxies(lines)
+	for _, p in ipairs(managed) do reserved[p.name] = nil end
+	normalize_names(list, reserved)
 	-- Validate
-	local seen_names = {}
 	for i, p in ipairs(list) do
 		local err = validate_proxy(p)
 		if err then
 			return json_out({ok = false, err = string.format("Row %d: %s", i, err)})
 		end
-		if seen_names[p.name] then
-			return json_out({ok = false, err = string.format("Duplicate name at row %d: %s", i, p.name)})
-		end
-		seen_names[p.name] = true
 	end
 	-- Save
-	local lines = read_lines()
 	lines = save_proxies_to_lines(list, lines)
 	lines = save_rules_to_lines(list, lines)
 	if write_lines(lines) then
@@ -720,16 +757,19 @@ HANDLERS["import"] = function()
 	if not ok then
 		return json_out({ok = false, err = err or "Parse failed"})
 	end
+	-- Limit to 500 entries
+	if #result > 500 then
+		return json_out({ok = false, err = "Too many entries (max 500)"})
+	end
+	-- Auto-fill empty names + dedup against ALL existing names in config
+	local reserved = parse_all_proxy_names(read_lines())
+	normalize_names(result, reserved)
 	-- Validate each result
 	for i, p in ipairs(result) do
 		local verr = validate_proxy(p)
 		if verr then
 			result[i]._warning = verr
 		end
-	end
-	-- Limit to 500 entries
-	if #result > 500 then
-		return json_out({ok = false, err = "Too many entries (max 500)"})
 	end
 	json_out({ok = true, data = result})
 end
