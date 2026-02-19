@@ -184,38 +184,44 @@ local SCHEMAS = {
 	}
 }
 
--- ============================================================
--- YAML Parsers (read config.yaml → Lua tables)
--- ============================================================
+local MANAGED_TYPES = {}
+for k, _ in pairs(SCHEMAS) do MANAGED_TYPES[k] = true end
+
+local function detect_managed_type(line)
+	local ptype = line:match("type:%s*(%w+)")
+	if ptype and MANAGED_TYPES[ptype] then return ptype end
+	-- Detect socks5 via YAML anchor reference <<: *s5
+	if line:match("%*s5") then return "socks5" end
+	return nil
+end
+
 local function parse_proxies(lines)
 	local proxies = {}
 	local in_block = false
 	for _, line in ipairs(lines) do
-		if line:match("落地节点信息从下面开始添加") then
+		if line:match("^proxies:") then
 			in_block = true
-		elseif line:match("落地节点信息必须添加在这一行上面") then
-			in_block = false
+		elseif in_block and line:match("^%S") then
+			break  -- left proxies block
 		elseif in_block and line:match("^%s*-%s*{") then
-			local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
-			local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
-			local port     = line:match("port:%s*(%d+)")
-			local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
-			local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
-			local ptype    = line:match("type:%s*(%w+)")
+			local ptype = detect_managed_type(line)
+			if ptype then
+				local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
+				local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
+				local port     = line:match("port:%s*(%d+)")
+				local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
+				local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
 
-			-- Detect type from anchor reference
-			if not ptype and line:match("*s5") then ptype = "socks5" end
-			ptype = ptype or "socks5"
-
-			if name and server and port and SCHEMAS[ptype] then
-				table.insert(proxies, {
-					name     = trim(name),
-					type     = trim(ptype),
-					server   = trim(server),
-					port     = tonumber(port),
-					username = trim(username or ""),
-					password = trim(password or ""),
-				})
+				if name and server and port then
+					table.insert(proxies, {
+						name     = trim(name),
+						type     = trim(ptype),
+						server   = trim(server),
+						port     = tonumber(port),
+						username = trim(username or ""),
+						password = trim(password or ""),
+					})
+				end
 			end
 		end
 	end
@@ -352,45 +358,47 @@ end
 -- ============================================================
 -- YAML Writers (Lua tables → write back config.yaml)
 -- ============================================================
-local function ensure_anchor_block(lines, marker_start, marker_end)
-	local found_start = false
-	for _, line in ipairs(lines) do
-		if line:match(marker_start) then found_start = true; break end
-	end
-	if not found_start then
-		-- Insert before "- {name: 直连" if exists, else before end of proxies
-		local insert_pos = #lines
-		for i, line in ipairs(lines) do
-			if line:match("直连") then insert_pos = i; break end
-		end
-		table.insert(lines, insert_pos, "  # " .. marker_start)
-		table.insert(lines, insert_pos + 1, "  # " .. marker_end)
-	end
-	return lines
-end
-
 local function save_proxies_to_lines(list, lines)
-	lines = ensure_anchor_block(lines, "落地节点信息从下面开始添加", "落地节点信息必须添加在这一行上面")
-
-	local start_idx, end_idx
+	-- Find proxies: section boundaries
+	local section_start, section_end
 	for i, line in ipairs(lines) do
-		if line:match("落地节点信息从下面开始添加") then start_idx = i end
-		if line:match("落地节点信息必须添加在这一行上面") then end_idx = i end
+		if line:match("^proxies:") then
+			section_start = i
+		elseif section_start and not section_end and line:match("^%S") then
+			section_end = i - 1
+		end
 	end
-	if not start_idx or not end_idx then return lines end
+	if not section_start then
+		-- No proxies: section, create one at end
+		table.insert(lines, "")
+		table.insert(lines, "proxies:")
+		section_start = #lines
+		section_end = #lines
+	end
+	if not section_end then section_end = #lines end
 
 	-- Build new proxy lines
-	local new_lines = {}
+	local new_proxy_lines = {}
 	for _, p in ipairs(list) do
 		local schema = SCHEMAS[p.type or "socks5"] or SCHEMAS.socks5
-		table.insert(new_lines, schema.output(p))
+		table.insert(new_proxy_lines, schema.output(p))
 	end
 
-	-- Replace everything between markers
+	-- Rebuild: keep non-managed lines, strip old managed lines and anchor comments
 	local result = {}
-	for i = 1, start_idx do table.insert(result, lines[i]) end
-	for _, nl in ipairs(new_lines) do table.insert(result, nl) end
-	for i = end_idx, #lines do table.insert(result, lines[i]) end
+	for i = 1, section_start do table.insert(result, lines[i]) end
+	for i = section_start + 1, section_end do
+		local line = lines[i]
+		local is_managed = line:match("^%s*-%s*{") and detect_managed_type(line)
+		local is_anchor = line:match("落地节点信息")
+		if not is_managed and not is_anchor then
+			table.insert(result, line)
+		end
+	end
+	-- Append managed proxies at end of section
+	for _, nl in ipairs(new_proxy_lines) do table.insert(result, nl) end
+	-- Rest of file
+	for i = section_end + 1, #lines do table.insert(result, lines[i]) end
 	return result
 end
 
