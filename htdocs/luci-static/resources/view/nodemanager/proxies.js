@@ -31,7 +31,7 @@ return view.extend({
 			self.renderPagination()
 		]);
 
-		self.refreshPage();
+		window.setTimeout(function() { self.refreshPage(); }, 0);
 		return view;
 	},
 
@@ -73,16 +73,17 @@ return view.extend({
 
 		var iStyle = 'width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;';
 
+		var thS = 'text-align:center;';
 		var thead = E('tr', {'class': 'tr table-titles'}, [
-			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
-			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
-			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Server')),
-			E('th', {'class': 'th', 'style': 'width:6ch'}, _('Port')),
-			E('th', {'class': 'th', 'style': 'width:10%'}, _('Username')),
-			E('th', {'class': 'th', 'style': 'width:10%'}, _('Password')),
-			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Bind IPs')),
-			E('th', {'class': 'th', 'style': 'width:45px'}, _('Delay')),
-			E('th', {'class': 'th', 'style': 'width:50px'}, _('Action'))
+			E('th', {'class': 'th', 'style': thS + 'width:24px'}, '☰'),
+			E('th', {'class': 'th', 'style': thS + 'width:12%'}, _('Name')),
+			E('th', {'class': 'th', 'style': thS + 'width:15ch'}, _('Server')),
+			E('th', {'class': 'th', 'style': thS + 'width:6ch'}, _('Port')),
+			E('th', {'class': 'th', 'style': thS + 'width:10%'}, _('Username')),
+			E('th', {'class': 'th', 'style': thS + 'width:10%'}, _('Password')),
+			E('th', {'class': 'th', 'style': thS + 'width:15ch'}, _('Bind IPs')),
+			E('th', {'class': 'th', 'style': thS + 'width:45px'}, _('Delay')),
+			E('th', {'class': 'th', 'style': thS + 'width:60px'}, _('Action'))
 		]);
 
 		var tbody = E('tbody', {'id': 'nm-proxy-body'});
@@ -195,9 +196,11 @@ return view.extend({
 			nm.delayBadge(null)
 		]);
 
+		var btnS = 'width:24px;height:24px;padding:0;font-size:12px;line-height:24px;text-align:center;';
+
 		var testBtn = E('button', {
 			'class': 'cbi-button',
-			'style': 'padding:1px 4px;font-size:11px;margin-right:2px;',
+			'style': btnS,
 			'disabled': !running ? '' : null,
 			'title': _('Test connectivity'),
 			'click': function(ev) { self.testOne(ev.target); }
@@ -205,7 +208,7 @@ return view.extend({
 
 		var delBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',
-			'style': 'padding:1px 4px;font-size:11px;',
+			'style': btnS,
 			'click': function(ev) {
 				if (confirm(_('Delete this row?'))) {
 					ev.target.closest('tr').remove();
@@ -247,7 +250,7 @@ return view.extend({
 				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.8.101'})
 			]),
 			delayCell,
-			E('td', {'class': 'td', 'style': 'white-space:nowrap;text-align:center;'}, [testBtn, delBtn])
+			E('td', {'class': 'td', 'style': 'white-space:nowrap;text-align:center;display:flex;gap:4px;justify-content:center;align-items:center;'}, [testBtn, delBtn])
 		]);
 	},
 
