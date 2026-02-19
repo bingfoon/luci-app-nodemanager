@@ -42,5 +42,13 @@
 			"type": "view",
 			"path": "nodemanager/logs"
 		}
+	},
+	"admin/services/nodemanager/about": {
+		"title": "About",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "nodemanager/about"
+		}
 	}
 }
