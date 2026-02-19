@@ -93,7 +93,8 @@ exit 0
 EOF
 chmod +x "$CTRL/prerm"
 
-# ── 打包 IPK（标准 opkg 格式：ar 归档 = debian-binary + control.tar.gz + data.tar.gz）──
+# ── 打包 IPK ──
+# macOS ar 生成 BSD 格式，opkg 需要 GNU 格式，用 printf 直接构建
 echo "2.0" > "$WORK/debian-binary"
 (cd "$DATA" && tar czf "$WORK/data.tar.gz" .)
 (cd "$CTRL" && tar czf "$WORK/control.tar.gz" .)
@@ -104,7 +105,25 @@ IPK_FILE="$OUTPUT_DIR/${PKG_NAME}_${PKG_VERSION}_all.ipk"
 # 清理旧的同名 IPK
 rm -f "$OUTPUT_DIR/${PKG_NAME}_"*.ipk
 
-(cd "$WORK" && ar cr "$IPK_FILE" debian-binary control.tar.gz data.tar.gz)
+# 生成 GNU ar 归档（跨平台，不依赖系统 ar）
+create_gnu_ar() {
+    local output="$1"; shift
+    printf '!<arch>\n' > "$output"
+    for file in "$@"; do
+        local name=$(basename "$file")
+        local size=$(wc -c < "$file" | tr -d ' ')
+        # GNU ar header: name(16) mtime(12) uid(6) gid(6) mode(8) size(10) end(2)
+        printf '%-16s%-12s%-6s%-6s%-8s%-10s\x60\n' \
+            "${name}/" "0" "0" "0" "100644" "$size" >> "$output"
+        cat "$file" >> "$output"
+        # ar 要求每个成员对齐到偶数字节
+        if [ $((size % 2)) -ne 0 ]; then
+            printf '\n' >> "$output"
+        fi
+    done
+}
+create_gnu_ar "$IPK_FILE" \
+    "$WORK/debian-binary" "$WORK/control.tar.gz" "$WORK/data.tar.gz"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
