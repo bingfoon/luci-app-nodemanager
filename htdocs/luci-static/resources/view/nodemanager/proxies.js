@@ -184,15 +184,16 @@ return view.extend({
 		});
 
 		var passToggle = E('span', {
-			'style': 'position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;user-select:none;font-size:12px;',
+			'style': 'position:absolute;right:4px;top:50%;transform:translateY(-50%);cursor:pointer;user-select:none;font-size:12px;z-index:1;',
 			'click': function() {
-				var inp = this.previousElementSibling;
+				var inp = this.parentNode.querySelector('input');
 				inp.type = inp.type === 'password' ? 'text' : 'password';
 				this.textContent = inp.type === 'password' ? '👁' : '🔒';
 			}
 		}, '👁');
 
-		var passCell = E('td', {'class': 'td', 'style': tdS + 'position:relative;'}, [passInput, passToggle]);
+		var passWrap = E('div', {'style': 'position:relative;width:100%;'}, [passInput, passToggle]);
+		var passCell = E('td', {'class': 'td', 'style': tdS}, [passWrap]);
 
 		var delayCell = E('td', {'class': 'td', 'data-field': 'delay', 'style': 'text-align:center;overflow:hidden;'}, [
 			nm.delayBadge(null)
@@ -510,5 +511,6 @@ return view.extend({
 	},
 
 	handleSaveApply: null,
-	handleReset: null
+	handleReset: null,
+	addFooter: function() { return E('div'); }
 });

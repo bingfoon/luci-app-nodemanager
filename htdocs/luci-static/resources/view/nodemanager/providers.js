@@ -123,5 +123,6 @@ return view.extend({
 	},
 
 	handleSaveApply: null,
-	handleReset: null
+	handleReset: null,
+	addFooter: function() { return E('div'); }
 });
