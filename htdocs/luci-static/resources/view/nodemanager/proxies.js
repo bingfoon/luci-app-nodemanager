@@ -77,7 +77,7 @@ return view.extend({
 			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
 			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
 			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Server')),
-			E('th', {'class': 'th', 'style': 'width:65px'}, _('Port')),
+			E('th', {'class': 'th', 'style': 'width:6ch'}, _('Port')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Username')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Password')),
 			E('th', {'class': 'th', 'style': 'width:15ch'}, _('Bind IPs')),
@@ -201,7 +201,7 @@ return view.extend({
 			'disabled': !running ? '' : null,
 			'title': _('Test connectivity'),
 			'click': function(ev) { self.testOne(ev.target); }
-		}, '🔍');
+		}, '⚡');
 
 		var delBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',

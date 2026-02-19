@@ -46,7 +46,7 @@ return view.extend({
 	renderSection: function(sec) {
 		var self = this;
 		var items = self.dns[sec.key] || [];
-		var bodyId = 'nm-dns-' + sec.key;
+		var bodyId = 'nm-dns-' + sec.key.replace(/-/g, '_');
 
 		var tbody = E('tbody', {'id': bodyId});
 		for (var i = 0; i < items.length; i++) {
@@ -71,7 +71,7 @@ return view.extend({
 					}
 				}, '+ ' + _('Add'))
 			]),
-			E('table', {'class': 'table cbi-section-table'}, [
+			E('table', {'class': 'table cbi-section-table', 'style': 'table-layout:auto;width:100%;'}, [
 				E('thead', {}, [
 					E('tr', {'class': 'tr table-titles'}, [
 						E('th', {'class': 'th'}, _('Address')),
@@ -93,10 +93,10 @@ return view.extend({
 					'data-field': 'dns',
 					'value': val,
 					'placeholder': placeholder,
-					'style': 'width:100%;box-sizing:border-box;'
+					'style': 'width:100%;min-width:200px;box-sizing:border-box;'
 				})
 			]),
-			E('td', {'class': 'td'}, [
+			E('td', {'class': 'td', 'style': 'width:60px;'}, [
 				E('button', {
 					'class': 'cbi-button cbi-button-remove',
 					'style': 'padding:2px 6px;',
@@ -112,7 +112,8 @@ return view.extend({
 		var dns_map = {};
 		for (var i = 0; i < DNS_SECTIONS.length; i++) {
 			var sec = DNS_SECTIONS[i];
-			var rows = document.querySelectorAll('#nm-dns-' + sec.key + ' tr');
+			var safeId = sec.key.replace(/-/g, '_');
+			var rows = document.querySelectorAll('#nm-dns-' + safeId + ' tr');
 			var list = [];
 			for (var j = 0; j < rows.length; j++) {
 				var v = rows[j].querySelector('[data-field="dns"]').value.trim();
