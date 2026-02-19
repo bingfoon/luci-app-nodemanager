@@ -256,11 +256,13 @@ end
 local function normalize_names(list, reserved)
 	local used = {}
 	for name in pairs(reserved or {}) do used[name] = 1 end
-	-- First pass: fill empty names
+	-- First pass: fill empty names with NM-001 pattern
+	local seq = 1
 	for _, p in ipairs(list) do
 		if not p.name or trim(p.name) == "" then
-			p.name = (p.server or "node") .. ":" .. (p.port or 0)
+			p.name = string.format("NM-%03d", seq)
 		end
+		seq = seq + 1
 	end
 	-- Second pass: dedup
 	for _, p in ipairs(list) do
