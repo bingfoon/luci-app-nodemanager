@@ -86,9 +86,12 @@ docker run --rm \
 set -euo pipefail
 SDK_DIR=/opt/sdk
 PKG_NAME=luci-app-nodemanager
-PKG_VERSION=2.0.0-1
 
-echo "==> 导入源码到 SDK..."
+# 从 git 自动生成版本号（与 Makefile 一致）
+GIT_VER=$(cd /src && git describe --tags --abbrev=0 2>/dev/null || echo "2.0.0")
+GIT_REL=$(cd /src && git rev-list HEAD --count 2>/dev/null || echo "1")
+PKG_VERSION="${GIT_VER}-${GIT_REL}"
+echo "==> 版本: $PKG_VERSION"
 rsync -a --delete --exclude ".git" --exclude ".github" --exclude "dist" --exclude "package" \
     /src/ "$SDK_DIR/package/$PKG_NAME"/
 
@@ -98,7 +101,6 @@ make -C "$SDK_DIR" V=s FORCE=1 -j$(nproc) package/$PKG_NAME/compile
 echo "==> 生成 zh-cn i18n IPK..."
 POFILE="$SDK_DIR/package/$PKG_NAME/po/zh-cn/nodemanager.po"
 I18N_PKG="luci-i18n-nodemanager-zh-cn"
-I18N_VER="2.0.0-1"
 if [ -f "$POFILE" ]; then
     # 1. po2lmo 转换
     TMPDIR=$(mktemp -d)
@@ -112,7 +114,7 @@ if [ -f "$POFILE" ]; then
     mkdir -p "$TMPDIR/control"
     cat > "$TMPDIR/control/control" <<CTRL
 Package: $I18N_PKG
-Version: $I18N_VER
+Version: $PKG_VERSION
 Depends: luci-app-nodemanager
 Section: luci
 Architecture: all
@@ -123,7 +125,7 @@ CTRL
     # 3. 打包
     (cd "$TMPDIR/data"    && tar czf "$TMPDIR/data.tar.gz" .)
     (cd "$TMPDIR/control" && tar czf "$TMPDIR/control.tar.gz" .)
-    (cd "$TMPDIR" && ar cr "/dist/${I18N_PKG}_${I18N_VER}_all.ipk" \
+    (cd "$TMPDIR" && ar cr "/dist/${I18N_PKG}_${PKG_VERSION}_all.ipk" \
         debian-binary control.tar.gz data.tar.gz)
     rm -rf "$TMPDIR"
     echo "✅ i18n IPK 创建完成"

@@ -4,8 +4,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-nodemanager
-PKG_VERSION:=2.0.0
-PKG_RELEASE:=1
+PKG_VERSION:=$(shell git -C $(CURDIR) describe --tags --abbrev=0 2>/dev/null || echo "2.0.0")
+PKG_RELEASE:=$(shell git -C $(CURDIR) rev-list HEAD --count 2>/dev/null || echo "1")
 PKG_LICENSE:=MIT
 
 # ===== LuCI meta =====
