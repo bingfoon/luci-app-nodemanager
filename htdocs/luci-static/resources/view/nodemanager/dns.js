@@ -79,6 +79,7 @@ return view.extend({
 	createRow: function(val, placeholder) {
 		val = val || '';
 		placeholder = placeholder || '';
+		var resultSpan = E('span', {'style': 'font-size:11px;min-width:40px;text-align:center;'}, '');
 		var row = E('div', {'style': 'display:flex;align-items:center;gap:6px;margin-bottom:4px;'}, [
 			E('input', {
 				'class': 'cbi-input-text',
@@ -87,6 +88,38 @@ return view.extend({
 				'placeholder': placeholder,
 				'style': 'width:50%;box-sizing:border-box;padding:3px 6px;font-size:13px;'
 			}),
+			E('button', {
+				'class': 'cbi-button',
+				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
+				'title': _('Test DNS'),
+				'click': function(ev) {
+					var btn = ev.target;
+					var input = btn.closest('div').querySelector('[data-field="dns"]');
+					var badge = btn.closest('div').querySelector('span');
+					var server = input.value.trim();
+					if (!server) return;
+					btn.disabled = true;
+					badge.textContent = '⏳';
+					badge.style.color = '#868e96';
+					nm.call('test_dns', {server: server})
+						.then(function(resp) {
+							if (resp && resp.ok && resp.data) {
+								var ms = resp.data.delay;
+								badge.textContent = ms != null ? ms + 'ms' : '✓';
+								badge.style.color = ms < 200 ? '#2ecc71' : ms < 500 ? '#f39c12' : '#e74c3c';
+							} else {
+								badge.textContent = '✗';
+								badge.style.color = '#e74c3c';
+							}
+						})
+						.catch(function() {
+							badge.textContent = '✗';
+							badge.style.color = '#e74c3c';
+						})
+						.finally(function() { btn.disabled = false; });
+				}
+			}, '⚡'),
+			resultSpan,
 			E('button', {
 				'class': 'cbi-button cbi-button-remove',
 				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
