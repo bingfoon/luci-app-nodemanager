@@ -74,7 +74,7 @@ return view.extend({
 			E('td', {'class': 'td'}, [
 				E('button', {
 					'class': 'cbi-button cbi-button-remove',
-					'style': 'padding:2px 6px;',
+					'style': 'width:24px;height:24px;padding:0;font-size:12px;line-height:24px;text-align:center;',
 					'click': function(ev) {
 						if (confirm(_('Delete this row?'))) {
 							ev.target.closest('tr').remove();
