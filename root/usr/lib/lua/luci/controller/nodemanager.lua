@@ -120,9 +120,6 @@ local function conf_path()
 	return "/etc/nikki/profiles/config.yaml"
 end
 
-local function tpl_path()
-	return "/usr/share/nodemanager/config.template.yaml"
-end
 
 local SAFE_PREFIXES = {"/etc/nikki/", "/tmp/", "/usr/share/nodemanager/"}
 
@@ -714,29 +711,15 @@ end
 -- ============================================================
 -- Ensure config file exists
 -- ============================================================
-local function ensure_file()
-	local path = conf_path()
-	if fs.access(path) then return true end
-	local dir = path:match("^(.+)/[^/]+$") or "/"
-	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
-	local tpl = tpl_path()
-	local content = fs.readfile(tpl)
-	if not content or #trim(content) == 0 then
-		return false, "Template not found: " .. tostring(tpl)
-	end
-	fs.writefile(path, content)
-	return fs.access(path)
-end
+
 
 -- ============================================================
 -- API Handlers
 -- ============================================================
 HANDLERS["load"] = function()
-	ensure_file()
 	local lines = read_lines()
 	local proxies = parse_proxies(lines)
 	local bindmap = parse_bindmap(lines)
-	-- Merge bindmap into proxies
 	for _, p in ipairs(proxies) do
 		p.bindips = bindmap[p.name] or {}
 	end
@@ -746,10 +729,6 @@ HANDLERS["load"] = function()
 			proxies   = proxies,
 			providers = parse_providers(lines),
 			dns       = parse_dns_servers(lines),
-			settings  = {
-				path     = conf_path(),
-				template = tpl_path(),
-			},
 			status    = get_service_status(),
 			schemas   = (function()
 				local s = {}
