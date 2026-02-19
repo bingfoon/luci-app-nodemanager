@@ -164,7 +164,7 @@ local function parse_proxies(lines)
 			if not ptype and line:match("*s5") then ptype = "socks5" end
 			ptype = ptype or "socks5"
 
-			if name and server and port then
+			if name and server and port and SCHEMAS[ptype] then
 				table.insert(proxies, {
 					name     = trim(name),
 					type     = trim(ptype),
