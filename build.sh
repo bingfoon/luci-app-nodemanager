@@ -47,18 +47,20 @@ RUN mkdir -p /tmp/sdk-dl && cd /tmp/sdk-dl && \
     mv openwrt-sdk-* "$SDK_DIR" && \
     rm -rf /tmp/sdk-dl
 
-# 修改 feeds.conf：注释掉不需要的 feed，确保 luci feed 存在
+# 确保 luci feed 存在
 RUN cd "$SDK_DIR" && \
-    sed -i '/^src-git.\+telephony/s/^/#/' feeds.conf.default && \
-    sed -i '/^src-git.\+routing/s/^/#/' feeds.conf.default && \
     (grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
-     echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default)
+     echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
+    echo "=== feeds.conf.default ===" && cat feeds.conf.default
 
-# 更新 feed 索引并安装 luci-base（注意：|| true 只作用于 defconfig）
-RUN cd "$SDK_DIR" && \
-    ./scripts/feeds update -a && \
-    ./scripts/feeds install luci-base && \
-    (make defconfig FORCE=1 || true)
+# 更新 feed 索引
+RUN cd "$SDK_DIR" && ./scripts/feeds update -a
+
+# 安装 luci-base
+RUN cd "$SDK_DIR" && ./scripts/feeds install luci-base
+
+# defconfig（允许失败）
+RUN cd "$SDK_DIR" && make defconfig FORCE=1 || true
 
 # 直接从 luci-base 源码编译 po2lmo（跳过完整的 make host/compile，快得多）
 RUN cd "$SDK_DIR/feeds/luci/modules/luci-base/src" && \
