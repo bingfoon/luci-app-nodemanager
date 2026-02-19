@@ -85,7 +85,7 @@ return view.extend({
 				'data-field': 'dns',
 				'value': val,
 				'placeholder': placeholder,
-				'style': 'flex:1;box-sizing:border-box;padding:3px 6px;font-size:13px;'
+				'style': 'width:50%;box-sizing:border-box;padding:3px 6px;font-size:13px;'
 			}),
 			E('button', {
 				'class': 'cbi-button cbi-button-remove',
