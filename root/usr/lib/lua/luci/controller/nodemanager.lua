@@ -258,8 +258,8 @@ local function parse_providers(lines)
 end
 
 local DNS_KEYS = {
-	"default-nameserver",
 	"proxy-server-nameserver",
+	"default-nameserver",
 	"direct-nameserver",
 	"nameserver",
 }
@@ -273,23 +273,26 @@ local function parse_dns_servers(lines)
 	for _, line in ipairs(lines) do
 		if line:match("^dns:") then
 			in_dns = true
+			cur_key = nil
 		elseif in_dns and line:match("^%S") then
 			break  -- left dns block
 		elseif in_dns then
-			-- Check if this line starts a known key
+			-- Try to match a known key header
+			local found_key = false
 			for _, k in ipairs(DNS_KEYS) do
-				if line:match("^%s+" .. k:gsub("%-", "%%-") .. ":") then
+				local pat = "^%s+" .. k:gsub("%-", "%%-") .. ":"
+				if line:match(pat) then
 					cur_key = k
+					found_key = true
 					break
 				end
 			end
-			-- Check for list item under current key
-			if cur_key then
+			if not found_key and cur_key then
 				local val = line:match("^%s+%-%s+(.+)")
 				if val then
 					table.insert(result[cur_key], trim(val))
-				elseif not line:match("^%s+%-") and not line:match(cur_key:gsub("%-", "%%-")) then
-					-- line is not a list item and not the key header → left this key's block
+				elseif not line:match("^%s+%-") then
+					-- Not a list item → this key's block ended
 					cur_key = nil
 				end
 			end
