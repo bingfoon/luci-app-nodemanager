@@ -77,26 +77,24 @@ local function conf_path()
 	local p = c:get_first("nodemanager", "main", "path")
 	if p and p ~= "" and fs.access(p) then return p end
 
-	-- 2. Check nikki UCI for active profile
+	-- 2. Read from running mihomo/nikki process -f flag (ground truth)
+	local ps = io.popen("ps w 2>/dev/null | grep -E 'mihomo|nikki' | grep -v grep")
+	if ps then
+		local psout = ps:read("*a")
+		ps:close()
+		if psout then
+			local fpath = psout:match("%-f%s+(%S+%.ya?ml)")
+			if fpath and fs.access(fpath) then return fpath end
+		end
+	end
+
+	-- 3. Check nikki UCI for active profile
 	local ok_nikki, _ = pcall(function()
 		p = c:get("nikki", "mixin", "profile_name")
 	end)
 	if ok_nikki and p and p ~= "" then
 		local candidate = "/etc/nikki/profiles/" .. p .. ".yaml"
 		if fs.access(candidate) then return candidate end
-	end
-
-	-- 3. Scan /etc/nikki/profiles/ for first .yaml file
-	local dir = "/etc/nikki/profiles/"
-	if fs.access(dir) then
-		local entries = fs.dir(dir)
-		if entries then
-			for entry in entries do
-				if entry:match("%.ya?ml$") then
-					return dir .. entry
-				end
-			end
-		end
 	end
 
 	-- 4. Default fallback
