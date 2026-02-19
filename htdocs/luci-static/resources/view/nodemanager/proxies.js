@@ -180,17 +180,19 @@ return view.extend({
 			'type': 'password',
 			'data-field': 'password',
 			'value': p.password || '',
-			'style': 'width:calc(100% - 20px);box-sizing:border-box;display:inline-block;'
+			'style': 'width:100%;box-sizing:border-box;padding-right:20px;'
 		});
 
 		var passToggle = E('span', {
-			'style': 'cursor:pointer;margin-left:2px;user-select:none;font-size:12px;',
+			'style': 'position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;user-select:none;font-size:12px;',
 			'click': function() {
 				var inp = this.previousElementSibling;
 				inp.type = inp.type === 'password' ? 'text' : 'password';
 				this.textContent = inp.type === 'password' ? '👁' : '🔒';
 			}
 		}, '👁');
+
+		var passCell = E('td', {'class': 'td', 'style': tdS + 'position:relative;'}, [passInput, passToggle]);
 
 		var delayCell = E('td', {'class': 'td', 'data-field': 'delay', 'style': 'text-align:center;overflow:hidden;'}, [
 			nm.delayBadge(null)
@@ -245,7 +247,7 @@ return view.extend({
 			E('td', {'class': 'td', 'style': tdS}, [
 				E('input', {'class': 'cbi-input-text', 'data-field': 'username', 'value': p.username || '', 'style': iS})
 			]),
-			E('td', {'class': 'td', 'style': tdS}, [passInput, passToggle]),
+			passCell,
 			E('td', {'class': 'td', 'style': tdS}, [
 				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.8.101'})
 			]),
