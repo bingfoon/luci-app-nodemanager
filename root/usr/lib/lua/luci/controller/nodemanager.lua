@@ -257,21 +257,45 @@ local function parse_providers(lines)
 	return providers
 end
 
+local DNS_KEYS = {
+	"default-nameserver",
+	"proxy-server-nameserver",
+	"direct-nameserver",
+	"nameserver",
+}
+
 local function parse_dns_servers(lines)
-	local servers = {}
-	local in_dns, in_ns = false, false
+	local result = {}
+	for _, k in ipairs(DNS_KEYS) do result[k] = {} end
+
+	local in_dns = false
+	local cur_key = nil
 	for _, line in ipairs(lines) do
-		if line:match("^dns:") then in_dns = true end
-		if in_dns and line:match("^%s+nameserver:") then in_ns = true
-		elseif in_ns then
-			if line:match("^%s*$") or (line:match("^%S") and not line:match("^%s")) then
-				break
+		if line:match("^dns:") then
+			in_dns = true
+		elseif in_dns and line:match("^%S") then
+			break  -- left dns block
+		elseif in_dns then
+			-- Check if this line starts a known key
+			for _, k in ipairs(DNS_KEYS) do
+				if line:match("^%s+" .. k:gsub("%-", "%%-") .. ":") then
+					cur_key = k
+					break
+				end
 			end
-			local ip = line:match("^%s+%-%s+(.+)")
-			if ip then table.insert(servers, trim(ip)) end
+			-- Check for list item under current key
+			if cur_key then
+				local val = line:match("^%s+%-%s+(.+)")
+				if val then
+					table.insert(result[cur_key], trim(val))
+				elseif not line:match("^%s+%-") and not line:match(cur_key:gsub("%-", "%%-")) then
+					-- line is not a list item and not the key header → left this key's block
+					cur_key = nil
+				end
+			end
 		end
 	end
-	return servers
+	return result
 end
 
 -- ============================================================
@@ -391,25 +415,56 @@ local function save_providers_to_lines(list, lines)
 	return result
 end
 
-local function save_dns_to_lines(servers, lines)
+local function save_dns_to_lines(dns_map, lines)
+	-- dns_map = { ["nameserver"] = {...}, ["default-nameserver"] = {...}, ... }
 	local result = {}
-	local in_dns, in_ns, ns_done = false, false, false
+	local in_dns = false
+	local cur_key = nil
+	local skip_items = false
+	local written_keys = {}  -- track which keys we've already written
+
 	for _, line in ipairs(lines) do
 		if line:match("^dns:") then
 			in_dns = true
 			table.insert(result, line)
-		elseif in_dns and line:match("^%s+nameserver:") then
-			in_ns = true
-			table.insert(result, line)
-			for _, ip in ipairs(servers) do
-				table.insert(result, "    - " .. ip)
+		elseif in_dns and line:match("^%S") then
+			-- Leaving dns block: insert any keys not yet written
+			for _, k in ipairs(DNS_KEYS) do
+				if not written_keys[k] and dns_map[k] and #dns_map[k] > 0 then
+					-- insert before leaving dns block
+					table.insert(result, "  " .. k .. ":")
+					for _, v in ipairs(dns_map[k]) do
+						table.insert(result, "    - " .. v)
+					end
+				end
 			end
-			ns_done = true
-		elseif in_ns then
-			if line:match("^%s+%-") then
-				-- skip old entries
+			in_dns = false
+			cur_key = nil
+			table.insert(result, line)
+		elseif in_dns then
+			local matched_key = nil
+			for _, k in ipairs(DNS_KEYS) do
+				if line:match("^%s+" .. k:gsub("%-", "%%-") .. ":") then
+					matched_key = k
+					break
+				end
+			end
+			if matched_key then
+				cur_key = matched_key
+				skip_items = true
+				written_keys[matched_key] = true
+				if dns_map[matched_key] and #dns_map[matched_key] > 0 then
+					table.insert(result, line)  -- keep the key line
+					for _, v in ipairs(dns_map[matched_key]) do
+						table.insert(result, "    - " .. v)
+					end
+				end
+				-- else: empty list, skip the key line entirely (remove it)
+			elseif skip_items and line:match("^%s+%-") then
+				-- skip old list items
 			else
-				in_ns = false
+				skip_items = false
+				cur_key = nil
 				table.insert(result, line)
 			end
 		else
@@ -703,17 +758,19 @@ end
 
 HANDLERS["save_dns"] = function()
 	local input = json_in()
-	local list = input.dns
-	if type(list) ~= "table" then
+	local dns_map = input.dns
+	if type(dns_map) ~= "table" then
 		return json_out({ok = false, err = "Invalid data"})
 	end
-	for i, ip in ipairs(list) do
-		if not ip:match("^[%d%.]+$") and not ip:match(":") then
-			return json_out({ok = false, err = string.format("Row %d: invalid IP", i)})
+	-- Validate: dns_map should be { "nameserver": [...], "default-nameserver": [...], ... }
+	for _, k in ipairs(DNS_KEYS) do
+		if dns_map[k] and type(dns_map[k]) ~= "table" then
+			return json_out({ok = false, err = k .. ": must be array"})
 		end
+		dns_map[k] = dns_map[k] or {}
 	end
 	local lines = read_lines()
-	lines = save_dns_to_lines(list, lines)
+	lines = save_dns_to_lines(dns_map, lines)
 	if write_lines(lines) then
 		json_out({ok = true})
 	else
