@@ -71,7 +71,7 @@ Installed-Size: $INSTALLED_SIZE
 Description: LuCI Node Manager - manage proxy nodes for nikki/Mihomo
 EOF
 
-# postinst: 刷新 rpcd ACL 和 uhttpd
+# postinst: 安装后刷新 rpcd ACL 和 uhttpd
 cat > "$CTRL/postinst" <<'EOF'
 #!/bin/sh
 [ -n "${IPKG_INSTROOT}" ] || {
@@ -82,6 +82,16 @@ cat > "$CTRL/postinst" <<'EOF'
 exit 0
 EOF
 chmod +x "$CTRL/postinst"
+
+# prerm: 卸载前清理 LuCI 缓存（否则菜单残留）
+cat > "$CTRL/prerm" <<'EOF'
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+    rm -rf /tmp/luci-modulecache /tmp/luci-indexcache* 2>/dev/null
+}
+exit 0
+EOF
+chmod +x "$CTRL/prerm"
 
 # ── 打包 IPK（标准 opkg 格式：ar 归档 = debian-binary + control.tar.gz + data.tar.gz）──
 echo "2.0" > "$WORK/debian-binary"
