@@ -275,6 +275,23 @@ local function normalize_names(list, reserved)
 	end
 end
 
+-- Normalize bind IP: .0 → /24, /32 → strip, CIDR → keep
+local function normalize_bindip(ip)
+	ip = trim(ip)
+	local addr, mask = ip:match("^([%d%.]+)/(%d+)$")
+	if addr and mask then
+		local m = tonumber(mask)
+		if m == 32 then return addr end  -- /32 = single IP, strip
+		return addr .. "/" .. mask
+	else
+		-- No CIDR: check if last octet is 0
+		if ip:match("%.0$") then
+			return ip .. "/24"  -- .0 = user means subnet
+		end
+		return ip
+	end
+end
+
 local function parse_bindmap(lines)
 	local map = {}
 	local in_rules = false
@@ -282,10 +299,15 @@ local function parse_bindmap(lines)
 		if line:match("^rules:") then in_rules = true
 		elseif in_rules then
 			if line:match("^%S") and not line:match("^%s") then break end
-			local ip, name = line:match("SRC%-IP,([%d%.]+),(.+)")
+			-- Match both SRC-IP-CIDR and SRC-IP
+			local ip, name = line:match("SRC%-IP%-CIDR,([%d%./]+),(.+)")
+			if not ip then
+				ip, name = line:match("SRC%-IP,([%d%.]+),(.+)")
+			end
 			if ip and name then
+				name = trim(name)
 				if not map[name] then map[name] = {} end
-				table.insert(map[name], ip)
+				table.insert(map[name], trim(ip))
 			end
 		end
 	end
@@ -414,12 +436,17 @@ local function save_proxies_to_lines(list, lines)
 end
 
 local function save_rules_to_lines(list, lines)
-	-- Build SRC-IP rules from bindips
+	-- Build SRC-IP / SRC-IP-CIDR rules from bindips
 	local rules = {}
 	for _, p in ipairs(list) do
 		if p.bindips then
-			for _, ip in ipairs(p.bindips) do
-				table.insert(rules, string.format("  - SRC-IP,%s,%s", ip, p.name))
+			for _, raw_ip in ipairs(p.bindips) do
+				local ip = normalize_bindip(raw_ip)
+				if ip:match("/") then
+					table.insert(rules, string.format("  - SRC-IP-CIDR,%s,%s", ip, p.name))
+				else
+					table.insert(rules, string.format("  - SRC-IP,%s,%s", ip, p.name))
+				end
 			end
 		end
 	end
@@ -437,8 +464,8 @@ local function save_rules_to_lines(list, lines)
 				table.insert(result, r)
 			end
 			rules_inserted = true
-		elseif in_rules and line:match("SRC%-IP,") then
-			-- Skip old SRC-IP lines
+		elseif in_rules and line:match("SRC%-IP") then
+			-- Skip old SRC-IP and SRC-IP-CIDR lines
 		else
 			if in_rules and line:match("^%S") and not line:match("^%s") then
 				in_rules = false
