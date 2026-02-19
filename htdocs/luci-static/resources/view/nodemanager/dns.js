@@ -33,79 +33,69 @@ return view.extend({
 		return E('div', {'class': 'cbi-map'}, [
 			E('h2', {}, _('DNS Servers')),
 			nm.renderStatusBar(self.status),
-			E('div', {'style': 'display:flex;gap:8px;margin-bottom:16px;'}, [
+			E('div', {'style': 'margin-bottom:12px;'}, [
 				E('button', {
 					'class': 'cbi-button cbi-button-save',
 					'id': 'nm-save-btn',
 					'click': function(ev) { self.handleSaveDns(ev.target); }
 				}, '💾 ' + _('Save'))
-			])
-		].concat(sections));
+			]),
+			E('div', {'id': 'nm-dns-sections'}, sections)
+		]);
 	},
 
 	renderSection: function(sec) {
 		var self = this;
 		var items = self.dns[sec.key] || [];
-		var bodyId = 'nm-dns-' + sec.key.replace(/-/g, '_');
+		var safeId = 'nm-dns-' + sec.key.replace(/-/g, '_');
 
-		var tbody = E('tbody', {'id': bodyId});
+		var listDiv = E('div', {'id': safeId});
 		for (var i = 0; i < items.length; i++) {
-			tbody.appendChild(self.createRow(items[i], sec.placeholder));
+			listDiv.appendChild(self.createRow(items[i], sec.placeholder));
 		}
 
-		return E('div', {'class': 'cbi-section', 'style': 'margin-bottom:16px;'}, [
-			E('div', {'style': 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;'}, [
-				E('h3', {'style': 'margin:0;font-size:14px;'}, _(sec.label)),
+		return E('div', {'style': 'margin-bottom:12px;padding:8px 12px;background:#f9f9f9;border:1px solid #e5e5e5;border-radius:4px;'}, [
+			E('div', {'style': 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;'}, [
+				E('strong', {'style': 'font-size:13px;'}, _(sec.label)),
 				E('button', {
 					'class': 'cbi-button cbi-button-add',
-					'style': 'padding:2px 10px;font-size:12px;',
-					'data-section': bodyId,
+					'style': 'padding:1px 8px;font-size:11px;',
+					'data-section': safeId,
 					'data-placeholder': sec.placeholder,
 					'click': function(ev) {
-						var bid = ev.target.getAttribute('data-section');
+						var sid = ev.target.getAttribute('data-section');
 						var ph = ev.target.getAttribute('data-placeholder');
-						var tb = document.getElementById(bid);
-						var tr = self.createRow('', ph);
-						tb.appendChild(tr);
-						tr.querySelector('[data-field="dns"]').focus();
+						var container = document.getElementById(sid);
+						var row = self.createRow('', ph);
+						container.appendChild(row);
+						row.querySelector('input').focus();
 					}
 				}, '+ ' + _('Add'))
 			]),
-			E('table', {'class': 'table cbi-section-table', 'style': 'table-layout:auto;width:100%;'}, [
-				E('thead', {}, [
-					E('tr', {'class': 'tr table-titles'}, [
-						E('th', {'class': 'th'}, _('Address')),
-						E('th', {'class': 'th', 'style': 'width:60px'}, _('Action'))
-					])
-				]),
-				tbody
-			])
+			listDiv
 		]);
 	},
 
 	createRow: function(val, placeholder) {
 		val = val || '';
 		placeholder = placeholder || '';
-		return E('tr', {'class': 'tr'}, [
-			E('td', {'class': 'td'}, [
-				E('input', {
-					'class': 'cbi-input-text',
-					'data-field': 'dns',
-					'value': val,
-					'placeholder': placeholder,
-					'style': 'width:100%;min-width:200px;box-sizing:border-box;'
-				})
-			]),
-			E('td', {'class': 'td', 'style': 'width:60px;'}, [
-				E('button', {
-					'class': 'cbi-button cbi-button-remove',
-					'style': 'padding:2px 6px;',
-					'click': function(ev) {
-						ev.target.closest('tr').remove();
-					}
-				}, '✕')
-			])
+		var row = E('div', {'style': 'display:flex;align-items:center;gap:6px;margin-bottom:4px;'}, [
+			E('input', {
+				'class': 'cbi-input-text',
+				'data-field': 'dns',
+				'value': val,
+				'placeholder': placeholder,
+				'style': 'flex:1;box-sizing:border-box;padding:3px 6px;font-size:13px;'
+			}),
+			E('button', {
+				'class': 'cbi-button cbi-button-remove',
+				'style': 'padding:1px 6px;font-size:11px;flex-shrink:0;',
+				'click': function(ev) {
+					ev.target.closest('div[style]').remove();
+				}
+			}, '✕')
 		]);
+		return row;
 	},
 
 	handleSaveDns: function(btn) {
@@ -113,10 +103,10 @@ return view.extend({
 		for (var i = 0; i < DNS_SECTIONS.length; i++) {
 			var sec = DNS_SECTIONS[i];
 			var safeId = sec.key.replace(/-/g, '_');
-			var rows = document.querySelectorAll('#nm-dns-' + safeId + ' tr');
+			var inputs = document.querySelectorAll('#nm-dns-' + safeId + ' [data-field="dns"]');
 			var list = [];
-			for (var j = 0; j < rows.length; j++) {
-				var v = rows[j].querySelector('[data-field="dns"]').value.trim();
+			for (var j = 0; j < inputs.length; j++) {
+				var v = inputs[j].value.trim();
 				if (v) list.push(v);
 			}
 			dns_map[sec.key] = list;
