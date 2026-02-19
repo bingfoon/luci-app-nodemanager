@@ -68,17 +68,19 @@ return view.extend({
 		var self = this;
 		var running = self.status && self.status.running;
 
+		var iStyle = 'width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;';
+
 		var thead = E('tr', {'class': 'tr table-titles'}, [
-			E('th', {'class': 'th', 'style': 'width:30px'}, '☰'),
-			E('th', {'class': 'th', 'style': 'width:90px'}, _('Type')),
-			E('th', {'class': 'th'}, _('Name')),
+			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
+			E('th', {'class': 'th', 'style': 'width:60px'}, _('Type')),
+			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
 			E('th', {'class': 'th'}, _('Server')),
-			E('th', {'class': 'th', 'style': 'width:70px'}, _('Port')),
-			E('th', {'class': 'th'}, _('Username')),
-			E('th', {'class': 'th'}, _('Password')),
-			E('th', {'class': 'th'}, _('Bind IPs')),
-			E('th', {'class': 'th', 'style': 'width:70px'}, _('Delay')),
-			E('th', {'class': 'th', 'style': 'width:60px'}, _('Action'))
+			E('th', {'class': 'th', 'style': 'width:55px'}, _('Port')),
+			E('th', {'class': 'th', 'style': 'width:10%'}, _('Username')),
+			E('th', {'class': 'th', 'style': 'width:10%'}, _('Password')),
+			E('th', {'class': 'th', 'style': 'width:15%'}, _('Bind IPs')),
+			E('th', {'class': 'th', 'style': 'width:45px'}, _('Delay')),
+			E('th', {'class': 'th', 'style': 'width:50px'}, _('Action'))
 		]);
 
 		var tbody = E('tbody', {'id': 'nm-proxy-body'});
@@ -89,7 +91,11 @@ return view.extend({
 
 		self.initDragDrop(tbody);
 
-		return E('table', {'class': 'table cbi-section-table', 'id': 'nm-proxy-table'}, [
+		return E('table', {
+			'class': 'table cbi-section-table',
+			'id': 'nm-proxy-table',
+			'style': 'table-layout:fixed;width:100%;'
+		}, [
 			E('thead', {}, [thead]),
 			tbody
 		]);
@@ -99,11 +105,14 @@ return view.extend({
 		var self = this;
 		p = p || {name: '', type: 'socks5', server: '', port: '', username: '', password: '', bindips: []};
 
+		var iS = 'width:100%;box-sizing:border-box;';
+
 		var typeSelect = E('select', {
 			'class': 'cbi-input-select',
-			'data-field': 'type'
+			'data-field': 'type',
+			'style': iS
 		}, [
-			E('option', {'value': 'socks5', 'selected': p.type === 'socks5' ? '' : null}, 'socks5'),
+			E('option', {'value': 'socks5', 'selected': p.type === 'socks5' ? '' : null}, 's5'),
 			E('option', {'value': 'http', 'selected': p.type === 'http' ? '' : null}, 'http')
 		]);
 
@@ -112,11 +121,11 @@ return view.extend({
 			'type': 'password',
 			'data-field': 'password',
 			'value': p.password || '',
-			'style': 'width:calc(100% - 24px);display:inline-block;'
+			'style': 'width:calc(100% - 20px);box-sizing:border-box;display:inline-block;'
 		});
 
 		var passToggle = E('span', {
-			'style': 'cursor:pointer;margin-left:4px;user-select:none;',
+			'style': 'cursor:pointer;margin-left:2px;user-select:none;font-size:12px;',
 			'click': function() {
 				var inp = this.previousElementSibling;
 				inp.type = inp.type === 'password' ? 'text' : 'password';
@@ -124,13 +133,13 @@ return view.extend({
 			}
 		}, '👁');
 
-		var delayCell = E('td', {'class': 'td', 'data-field': 'delay'}, [
+		var delayCell = E('td', {'class': 'td', 'data-field': 'delay', 'style': 'text-align:center;overflow:hidden;'}, [
 			nm.delayBadge(null)
 		]);
 
 		var testBtn = E('button', {
 			'class': 'cbi-button',
-			'style': 'padding:2px 6px;font-size:11px;margin-right:4px;',
+			'style': 'padding:1px 4px;font-size:11px;margin-right:2px;',
 			'disabled': !running ? '' : null,
 			'title': _('Test connectivity'),
 			'click': function(ev) { self.testOne(ev.target); }
@@ -138,7 +147,7 @@ return view.extend({
 
 		var delBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',
-			'style': 'padding:2px 6px;font-size:11px;',
+			'style': 'padding:1px 4px;font-size:11px;',
 			'click': function(ev) {
 				if (confirm(_('Delete this row?'))) {
 					ev.target.closest('tr').remove();
@@ -146,27 +155,29 @@ return view.extend({
 			}
 		}, '✕');
 
+		var tdS = 'overflow:hidden;text-overflow:ellipsis;';
+
 		return E('tr', {'class': 'tr', 'draggable': 'true'}, [
 			E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;'}, '☰'),
-			E('td', {'class': 'td'}, [typeSelect]),
-			E('td', {'class': 'td'}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'name', 'value': p.name, 'required': ''})
+			E('td', {'class': 'td', 'style': tdS}, [typeSelect]),
+			E('td', {'class': 'td', 'style': tdS}, [
+				E('input', {'class': 'cbi-input-text', 'data-field': 'name', 'value': p.name, 'style': iS, 'required': ''})
 			]),
-			E('td', {'class': 'td'}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'server', 'value': p.server, 'required': ''})
+			E('td', {'class': 'td', 'style': tdS}, [
+				E('input', {'class': 'cbi-input-text', 'data-field': 'server', 'value': p.server, 'style': iS, 'required': ''})
 			]),
-			E('td', {'class': 'td'}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'port', 'value': p.port || '', 'type': 'number', 'min': '1', 'max': '65535', 'required': ''})
+			E('td', {'class': 'td', 'style': tdS}, [
+				E('input', {'class': 'cbi-input-text', 'data-field': 'port', 'value': p.port || '', 'style': iS, 'required': ''})
 			]),
-			E('td', {'class': 'td'}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'username', 'value': p.username || ''})
+			E('td', {'class': 'td', 'style': tdS}, [
+				E('input', {'class': 'cbi-input-text', 'data-field': 'username', 'value': p.username || '', 'style': iS})
 			]),
-			E('td', {'class': 'td'}, [passInput, passToggle]),
-			E('td', {'class': 'td'}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'placeholder': '192.168.8.101, ...'})
+			E('td', {'class': 'td', 'style': tdS}, [passInput, passToggle]),
+			E('td', {'class': 'td', 'style': tdS}, [
+				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.8.101'})
 			]),
 			delayCell,
-			E('td', {'class': 'td', 'style': 'white-space:nowrap;'}, [testBtn, delBtn])
+			E('td', {'class': 'td', 'style': 'white-space:nowrap;text-align:center;'}, [testBtn, delBtn])
 		]);
 	},
 
