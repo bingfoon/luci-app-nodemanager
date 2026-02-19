@@ -759,6 +759,22 @@ HANDLERS["save_providers"] = function()
 	end
 end
 
+HANDLERS["debug_dns"] = function()
+	local lines = read_lines()
+	local dns_result = parse_dns_servers(lines)
+	-- Also capture raw dns lines for debugging
+	local raw_dns = {}
+	local in_dns = false
+	for i, line in ipairs(lines) do
+		if line:match("^dns:") then in_dns = true end
+		if in_dns then
+			table.insert(raw_dns, string.format("L%d: %s", i, line))
+			if in_dns and line:match("^%S") and not line:match("^dns:") then break end
+		end
+	end
+	json_out({ok = true, dns_parsed = dns_result, raw_lines = raw_dns, total_lines = #lines})
+end
+
 HANDLERS["save_dns"] = function()
 	local input = json_in()
 	local dns_map = input.dns
