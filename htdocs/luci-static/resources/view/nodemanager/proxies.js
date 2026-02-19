@@ -74,11 +74,11 @@ return view.extend({
 			E('th', {'class': 'th', 'style': 'width:24px'}, '☰'),
 			E('th', {'class': 'th', 'style': 'width:60px'}, _('Type')),
 			E('th', {'class': 'th', 'style': 'width:12%'}, _('Name')),
-			E('th', {'class': 'th'}, _('Server')),
-			E('th', {'class': 'th', 'style': 'width:55px'}, _('Port')),
+			E('th', {'class': 'th', 'style': 'width:130px'}, _('Server')),
+			E('th', {'class': 'th', 'style': 'width:65px'}, _('Port')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Username')),
 			E('th', {'class': 'th', 'style': 'width:10%'}, _('Password')),
-			E('th', {'class': 'th', 'style': 'width:15%'}, _('Bind IPs')),
+			E('th', {'class': 'th'}, _('Bind IPs')),
 			E('th', {'class': 'th', 'style': 'width:45px'}, _('Delay')),
 			E('th', {'class': 'th', 'style': 'width:50px'}, _('Action'))
 		]);
