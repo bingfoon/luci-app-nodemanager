@@ -33,10 +33,10 @@ ENV TERM=dumb
 ENV SDK_DIR=/opt/sdk
 ENV FORCE_UNSAFE_CONFIGURE=1
 
-# 安装 SDK 编译依赖（精简：去掉未使用的 wget/python3-distutils）
+# 安装 SDK 编译依赖（wget/python3-distutils 是 SDK prerequisite 强制要求的）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gawk gettext unzip zstd rsync curl ca-certificates \
-    python3 file libncurses-dev git perl libssl-dev && \
+    build-essential gawk gettext unzip zstd rsync curl wget ca-certificates \
+    python3 python3-distutils file libncurses-dev git perl libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # 下载并解压 OpenWrt SDK（此步被 Docker layer 缓存）
