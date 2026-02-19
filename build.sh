@@ -1,152 +1,107 @@
 #!/bin/bash
 # ============================================================
-# luci-app-nodemanager — Docker 本地构建脚本
-# 在 macOS/Linux 上无需安装任何编译工具链，一键生成 IPK
+# luci-app-nodemanager — 纯 Shell IPK 打包脚本
+# 无需 Docker / SDK / 交叉编译，本机直接生成 IPK
 # ============================================================
 set -euo pipefail
 
-# ── 配置 ──
-SDK_URL="https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-IMAGE_NAME="nodemanager-builder"
-CONTAINER_NAME="nm-build-$$"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/dist"
+PKG_NAME="luci-app-nodemanager"
 
-echo "🔨 luci-app-nodemanager 本地 Docker 构建"
-echo "   项目目录: $PROJECT_DIR"
-echo "   输出目录: $OUTPUT_DIR"
+# 从 git 自动生成版本号
+VERSION=$(cd "$PROJECT_DIR" && git describe --tags --abbrev=0 2>/dev/null || echo "2.0.0")
+RELEASE=$(cd "$PROJECT_DIR" && git rev-list HEAD --count 2>/dev/null || echo "1")
+PKG_VERSION="${VERSION}-${RELEASE}"
+
+echo "🔨 $PKG_NAME 打包"
+echo "   版本: $PKG_VERSION"
+echo "   项目: $PROJECT_DIR"
 echo ""
 
-# ── 检查 Docker ──
-if ! command -v docker &>/dev/null; then
-    echo "❌ 未找到 docker，请先安装 Docker Desktop"
-    exit 1
+# ── 准备临时目录 ──
+WORK=$(mktemp -d)
+trap "rm -rf '$WORK'" EXIT
+
+DATA="$WORK/data"
+CTRL="$WORK/control"
+mkdir -p "$DATA" "$CTRL"
+
+# ── 收集文件 ──
+# htdocs/ → /www/（LuCI 惯例：htdocs 映射到 web root）
+if [ -d "$PROJECT_DIR/htdocs" ]; then
+    mkdir -p "$DATA/www"
+    cp -a "$PROJECT_DIR/htdocs/." "$DATA/www/"
+    echo "  ✓ htdocs → /www/"
 fi
 
-# ── 构建 Docker 镜像（带缓存，首次约 5-10 分钟）──
-echo "📦 构建 Docker 镜像（SDK 下载会被 Docker 缓存）..."
-docker build -t "$IMAGE_NAME" --build-arg "SDK_URL=$SDK_URL" -f - "$PROJECT_DIR" <<'DOCKERFILE'
-FROM ubuntu:22.04
+# root/ → /（原样安装）
+if [ -d "$PROJECT_DIR/root" ]; then
+    cp -a "$PROJECT_DIR/root/." "$DATA/"
+    echo "  ✓ root → /"
+fi
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TERM=dumb
-ENV SDK_DIR=/opt/sdk
-ENV FORCE_UNSAFE_CONFIGURE=1
+# files/ → /（原样安装）
+if [ -d "$PROJECT_DIR/files" ]; then
+    cp -a "$PROJECT_DIR/files/." "$DATA/"
+    echo "  ✓ files → /"
+fi
 
-# 安装 SDK 编译依赖（wget/python3-distutils 是 SDK prerequisite 强制要求的）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gawk gettext unzip zstd rsync curl wget ca-certificates \
-    python3 python3-distutils file libncurses-dev git perl libssl-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# 下载并解压 OpenWrt SDK（此步被 Docker layer 缓存）
-ARG SDK_URL
-RUN mkdir -p /tmp/sdk-dl && cd /tmp/sdk-dl && \
-    curl -L --retry 3 -o sdk.tar.zst "$SDK_URL" && \
-    tar --zstd -xf sdk.tar.zst && \
-    mv openwrt-sdk-* "$SDK_DIR" && \
-    rm -rf /tmp/sdk-dl
-
-# 确保 luci feed 存在
-RUN cd "$SDK_DIR" && \
-    (grep -qE '^src-git[[:space:]]+luci[[:space:]]' feeds.conf.default || \
-     echo 'src-git luci https://github.com/openwrt/luci.git;openwrt-24.10' >> feeds.conf.default) && \
-    echo "=== feeds.conf.default ===" && cat feeds.conf.default
-
-# 更新 feed 索引
-RUN cd "$SDK_DIR" && ./scripts/feeds update -a
-
-# 安装 luci-base
-RUN cd "$SDK_DIR" && ./scripts/feeds install luci-base
-
-# defconfig（允许失败）
-RUN cd "$SDK_DIR" && make defconfig FORCE=1 || true
-
-# 直接从 luci-base 源码编译 po2lmo（跳过完整的 make host/compile，快得多）
-RUN cd "$SDK_DIR/feeds/luci/modules/luci-base/src" && \
-    mkdir -p "$SDK_DIR/staging_dir/host/bin" && \
-    cc -std=gnu17 -o contrib/lemon contrib/lemon.c && \
-    make po2lmo CC=gcc CFLAGS="-O2" LDFLAGS="" && \
-    cp po2lmo "$SDK_DIR/staging_dir/host/bin/po2lmo" && \
-    echo "✅ po2lmo 编译完成"
-
-WORKDIR /build
-DOCKERFILE
+# 统计安装大小
+if stat --version &>/dev/null 2>&1; then
+    # GNU stat (Linux)
+    INSTALLED_SIZE=$(du -sb "$DATA" | cut -f1)
+else
+    # BSD stat (macOS)
+    INSTALLED_SIZE=$(find "$DATA" -type f -exec stat -f%z {} + | awk '{s+=$1}END{print s}')
+fi
 
 echo ""
-echo "🚀 开始编译..."
+echo "  📦 安装大小: ${INSTALLED_SIZE} bytes"
+echo ""
 
-# ── 运行编译容器 ──
-mkdir -p "$OUTPUT_DIR"
-
-docker run --rm \
-    --name "$CONTAINER_NAME" \
-    -v "$PROJECT_DIR:/src:ro" \
-    -v "$OUTPUT_DIR:/dist" \
-    "$IMAGE_NAME" \
-    bash -c '
-set -euo pipefail
-SDK_DIR=/opt/sdk
-PKG_NAME=luci-app-nodemanager
-
-# 从 git 自动生成版本号（与 Makefile 一致）
-GIT_VER=$(cd /src && git describe --tags --abbrev=0 2>/dev/null || echo "2.0.0")
-GIT_REL=$(cd /src && git rev-list HEAD --count 2>/dev/null || echo "1")
-PKG_VERSION="${GIT_VER}-${GIT_REL}"
-echo "==> 版本: $PKG_VERSION"
-rsync -a --delete --exclude ".git" --exclude ".github" --exclude "dist" --exclude "package" \
-    /src/ "$SDK_DIR/package/$PKG_NAME"/
-
-echo "==> 编译 $PKG_NAME..."
-make -C "$SDK_DIR" V=s FORCE=1 -j$(nproc) package/$PKG_NAME/compile
-
-echo "==> 生成 zh-cn i18n IPK..."
-POFILE="$SDK_DIR/package/$PKG_NAME/po/zh-cn/nodemanager.po"
-I18N_PKG="luci-i18n-nodemanager-zh-cn"
-if [ -f "$POFILE" ]; then
-    # 1. po2lmo 转换
-    TMPDIR=$(mktemp -d)
-    mkdir -p "$TMPDIR/data/usr/share/luci/i18n"
-    "$SDK_DIR/staging_dir/host/bin/po2lmo" "$POFILE" \
-        "$TMPDIR/data/usr/share/luci/i18n/nodemanager.zh-cn.lmo"
-
-    # 2. 构造 IPK 结构（IPK = ar 归档: debian-binary + control.tar.gz + data.tar.gz）
-    echo "2.0" > "$TMPDIR/debian-binary"
-
-    mkdir -p "$TMPDIR/control"
-    cat > "$TMPDIR/control/control" <<CTRL
-Package: $I18N_PKG
+# ── 生成 control 文件 ──
+cat > "$CTRL/control" <<EOF
+Package: $PKG_NAME
 Version: $PKG_VERSION
-Depends: luci-app-nodemanager
+Depends: luci-base
 Section: luci
 Architecture: all
-Installed-Size: $(du -sb "$TMPDIR/data" | cut -f1)
-Description: Chinese (zh-cn) translation for luci-app-nodemanager
-CTRL
+Installed-Size: $INSTALLED_SIZE
+Description: LuCI Node Manager - manage proxy nodes for nikki/Mihomo
+EOF
 
-    # 3. 打包
-    (cd "$TMPDIR/data"    && tar czf "$TMPDIR/data.tar.gz" .)
-    (cd "$TMPDIR/control" && tar czf "$TMPDIR/control.tar.gz" .)
-    (cd "$TMPDIR" && ar cr "/dist/${I18N_PKG}_${PKG_VERSION}_all.ipk" \
-        debian-binary control.tar.gz data.tar.gz)
-    rm -rf "$TMPDIR"
-    echo "✅ i18n IPK 创建完成"
-fi
+# postinst: 刷新 rpcd ACL 和 uhttpd
+cat > "$CTRL/postinst" <<'EOF'
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+    /etc/init.d/rpcd restart 2>/dev/null
+    /etc/init.d/uhttpd restart 2>/dev/null
+    rm -rf /tmp/luci-modulecache /tmp/luci-indexcache* 2>/dev/null
+}
+exit 0
+EOF
+chmod +x "$CTRL/postinst"
 
-echo "==> 收集 IPK..."
-find "$SDK_DIR/bin" -type f -name "${PKG_NAME}_*.ipk" \
-    -exec cp -v {} /dist/ \;
+# ── 打包 IPK（标准 opkg 格式：ar 归档 = debian-binary + control.tar.gz + data.tar.gz）──
+echo "2.0" > "$WORK/debian-binary"
+(cd "$DATA" && tar czf "$WORK/data.tar.gz" .)
+(cd "$CTRL" && tar czf "$WORK/control.tar.gz" .)
 
-echo ""
-echo "✅ 构建完成！IPK 文件："
-ls -lh /dist/*.ipk 2>/dev/null || echo "⚠️  未找到 IPK 文件"
-'
+mkdir -p "$OUTPUT_DIR"
+IPK_FILE="$OUTPUT_DIR/${PKG_NAME}_${PKG_VERSION}_all.ipk"
+
+# 清理旧的同名 IPK
+rm -f "$OUTPUT_DIR/${PKG_NAME}_"*.ipk
+
+(cd "$WORK" && ar cr "$IPK_FILE" debian-binary control.tar.gz data.tar.gz)
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📁 IPK 输出目录: $OUTPUT_DIR"
-ls -lh "$OUTPUT_DIR"/*.ipk 2>/dev/null || echo "⚠️  未找到 IPK 文件"
+echo "✅ 打包完成！"
+ls -lh "$IPK_FILE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "安装到路由器:  scp dist/*.ipk root@<router>:/tmp/"
-echo "             ssh root@<router> 'opkg install /tmp/luci-app-*.ipk /tmp/luci-i18n-*.ipk'"
+echo "安装到路由器:"
+echo "  scp $IPK_FILE root@<router>:/tmp/"
+echo "  ssh root@<router> 'opkg install /tmp/$(basename "$IPK_FILE")'"
