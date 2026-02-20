@@ -164,16 +164,17 @@ proxy-groups:
 
 ## Bind IP 规则管理
 
-节点的 Bind IP 保存为 `config.yaml` → `rules:` 段的 `SRC-IP-CIDR` 规则：
+节点的 Bind IP 保存为 `config.yaml` → `rules:` 段的 `SRC-IP-CIDR` 规则。
+规则中的代理名必须包含 `[NM] ` 前缀，与 provider 的 `additional-prefix` 一致：
 
 ```yaml
 rules:
-  - SRC-IP-CIDR,192.168.5.101/32,🇺🇲 S5 US01   # 自动生成
-  - RULE-SET,proxylite,🚀 默认代理               # 锚点行
+  - SRC-IP-CIDR,192.168.5.101/32,[NM] 🇺🇲 S5 US01   # 自动生成
+  - RULE-SET,ai,🤖 ChatGPT                            # 锚点行
 ```
 
 **保存策略（幂等）**：
-1. 扫描 `rules:` 段，只删除**托管节点名**对应的 SRC-IP 规则（用户手动添加的非托管规则不受影响）
+1. 扫描 `rules:` 段，只删除**托管节点名**对应的 SRC-IP 规则（兼容带/不带 `[NM] ` 前缀）
 2. 在 `RULE-SET,ai` 行前面插入新规则（找不到则回退到段末尾）
 
 ## YAML 解析策略

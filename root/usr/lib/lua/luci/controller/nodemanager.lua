@@ -533,22 +533,84 @@ local function save_proxies_to_lines(list, lines)
 	return result
 end
 
+-- Inject bind proxy-groups: one group per proxy with bindips
+-- These groups allow SRC-IP rules to reference provider proxies indirectly
+-- (Mihomo validates rules before loading providers, so direct reference fails)
+local function inject_bind_groups(lines, list)
+	local managed = {}
+	for _, p in ipairs(list) do managed[p.name] = true end
+
+	-- Build bind groups for proxies that have bindips
+	local bind_groups = {}
+	for _, p in ipairs(list) do
+		if p.bindips then
+			local has_ips = false
+			for _, ip in ipairs(p.bindips) do
+				if ip and ip ~= "" then has_ips = true; break end
+			end
+			if has_ips then
+				-- Escape regex metacharacters, with YAML double-quote \\ encoding
+				local escaped = p.name:gsub("([%.%*%+%?%[%]%(%)%{%}%^%$%|])", "\\\\%1")
+				local filter = "^\\\\[NM\\\\] " .. escaped .. "$"
+				table.insert(bind_groups, string.format(
+					'  - {name: "%s", type: select, use: [%s], filter: "%s"}',
+					p.name, NM_PROVIDER_NAME, filter))
+			end
+		end
+	end
+
+	if #bind_groups == 0 and not next(managed) then return lines end
+
+	-- Process proxy-groups section: remove old bind groups, insert new ones
+	local result = {}
+	local in_pg = false
+	local groups_inserted = false
+	local escaped_nm_group = NM_GROUP_NAME:gsub("([%%%.%+%-%*%?%[%^%$%(%)%{%}])", "%%%1")
+
+	for _, line in ipairs(lines) do
+		if line:match("^proxy%-groups:") then
+			in_pg = true
+			table.insert(result, line)
+		elseif in_pg and line:match("^%S") then
+			in_pg = false
+			table.insert(result, line)
+		elseif in_pg then
+			-- Check if this group is a bind group for a managed proxy → remove
+			local gname = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
+			if gname and managed[trim(gname)] then
+				-- Skip: old bind group, will be re-generated
+			else
+				-- Insert new bind groups right before 🏠 住宅节点
+				if not groups_inserted and line:match(escaped_nm_group) then
+					for _, bg in ipairs(bind_groups) do table.insert(result, bg) end
+					groups_inserted = true
+				end
+				table.insert(result, line)
+			end
+		else
+			table.insert(result, line)
+		end
+	end
+
+	return result
+end
+
 local function save_rules_to_lines(list, lines)
 	-- Build managed proxy name set for targeted deletion
 	local managed = {}
 	for _, p in ipairs(list) do managed[p.name] = true end
 
-	-- Build SRC-IP / SRC-IP-CIDR rules from bindips
+	-- Build SRC-IP-CIDR rules from bindips
+	-- Rules reference bind proxy-groups (unprefixed name), not provider proxies directly
+	-- (Mihomo validates rules before loading providers, so direct reference fails)
+	-- Note: Mihomo only supports SRC-IP-CIDR, not SRC-IP; single IPs get /32
 	local rules = {}
 	for _, p in ipairs(list) do
 		if p.bindips then
 			for _, raw_ip in ipairs(p.bindips) do
 				local ip = normalize_bindip(raw_ip)
-				if ip:match("/") then
-					table.insert(rules, string.format("  - SRC-IP-CIDR,%s,%s", ip, p.name))
-				else
-					table.insert(rules, string.format("  - SRC-IP,%s,%s", ip, p.name))
-				end
+				if not ip:match("/") then ip = ip .. "/32" end
+				table.insert(rules, string.format("  - SRC-IP-CIDR,%s,%s", ip, p.name))
 			end
 		end
 	end
@@ -569,8 +631,10 @@ local function save_rules_to_lines(list, lines)
 			-- Check if this is a SRC-IP rule for a managed proxy → skip it
 			local target = line:match("SRC%-IP%-CIDR,[^,]+,(.+)") or line:match("SRC%-IP,([^,]+),(.+)")
 			if target then
-				target = line:match(",([^,]+)$")  -- last field = proxy name
-				if target and managed[trim(target)] then
+				target = trim(line:match(",([^,]+)$"))  -- last field = proxy name
+				-- Match both prefixed and unprefixed names (migration compat)
+				local base = target:match("^%[NM%] (.+)") or target
+				if managed[base] then
 					-- Skip: managed proxy SRC-IP rule (will be re-generated)
 				else
 					table.insert(result, line)  -- Keep: user's custom SRC-IP rule
@@ -1134,8 +1198,9 @@ rebuild_config = function(proxy_list)
 	-- 3. Inject nm-nodes provider entry from template (source of truth)
 	tpl_lines = save_provider_entry_to_lines(tpl_lines, nm_entry)
 
-	-- 4. SRC-IP bind rules
+	-- 4. Bind groups + SRC-IP rules
 	if proxy_list then
+		tpl_lines = inject_bind_groups(tpl_lines, proxy_list)
 		tpl_lines = save_rules_to_lines(proxy_list, tpl_lines)
 	end
 

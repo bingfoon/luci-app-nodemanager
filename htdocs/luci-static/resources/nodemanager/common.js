@@ -27,7 +27,7 @@ return baseclass.extend({
 		});
 
 		var label = E('span', {}, running
-			? _('nikki running') + (version ? ' (v' + version + ')' : '')
+			? _('nikki running') + (version ? ' (' + version + ')' : '')
 			: _('nikki stopped'));
 
 		var btn = E('button', {
