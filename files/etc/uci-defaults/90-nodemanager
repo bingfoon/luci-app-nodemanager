@@ -4,6 +4,7 @@ uci -q show nodemanager >/dev/null 2>&1 || {
 set nodemanager.main=main
 set nodemanager.main.path='/etc/nikki/profiles/config.yaml'
 set nodemanager.main.template='/usr/share/nodemanager/config.template.yaml'
+set nodemanager.main.fingerprint='chrome'
 commit nodemanager
 EOF
 }

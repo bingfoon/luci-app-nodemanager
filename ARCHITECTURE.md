@@ -47,7 +47,7 @@ luci-app-nodemanager/
 │       └── rpcd/acl.d/
 │           └── luci-app-nodemanager.json   # ACL 权限 (文件读写白名单)
 ├── files/etc/uci-defaults/
-│   └── 90-nodemanager                # 首次安装 UCI 初始化
+│   └── 90-nodemanager                # 首次安装 UCI 初始化 (path/fingerprint)
 ├── po/
 │   ├── en/nodemanager.po             # 英文翻译 (源文本)
 │   └── zh-cn/nodemanager.po          # 中文翻译
@@ -143,3 +143,19 @@ proxy-groups:
 ```
 
 单次导入上限 64KB / 500 条。
+
+## Client-Fingerprint 自动迁移
+
+Mihomo 废弃了 `global-client-fingerprint` 全局配置，要求在每个 proxy 上单独设置 `client-fingerprint`。
+
+插件在保存节点时自动处理：
+
+```
+1. 读主配置的 global-client-fingerprint 值
+2. 迁移到 UCI: nodemanager.main.fingerprint（持久存储）
+3. 删除主配置中的 global-client-fingerprint 行
+4. 每个 proxy 注入 client-fingerprint: "<值>"
+```
+
+- UCI 默认值：`chrome`（首次安装时设置）
+- 空字符串 = 不注入

@@ -153,19 +153,37 @@ local function read_lines()
 	local content = fs.readfile(path)
 	if not content then return {} end
 	local lines = {}
-	for line in content:gmatch("[^\n]*") do
+	-- Use (.-)\n to correctly split by newlines without phantom empty matches
+	for line in (content .. "\n"):gmatch("(.-)\n") do
 		table.insert(lines, line)
+	end
+	-- Remove trailing empty line from appended \n
+	if #lines > 0 and lines[#lines] == "" then
+		table.remove(lines)
 	end
 	return lines
 end
 
 local function write_lines(lines)
 	local path = conf_path()
+	-- Auto-migrate: strip deprecated global-client-fingerprint on every write
+	local filtered = {}
+	for _, line in ipairs(lines) do
+		local fp = line:match("^%s*global%-client%-fingerprint:%s*(.+)")
+		if fp then
+			-- Migrate value to UCI before removing
+			local c = uci_cursor()
+			c:set("nodemanager", "main", "fingerprint", trim(fp))
+			c:commit("nodemanager")
+		else
+			table.insert(filtered, line)
+		end
+	end
 	-- Backup before write
 	if fs.access(path) then
 		fs.copy(path, path .. ".bak")
 	end
-	return fs.writefile(path, table.concat(lines, "\n"))
+	return fs.writefile(path, table.concat(filtered, "\n"))
 end
 
 -- ============================================================
@@ -174,20 +192,23 @@ end
 local SCHEMAS = {
 	socks5 = {
 		required = {"username", "password"},
-		output = function(p)
-			return string.format(
-				'  - {name: "%s", type: socks5, server: "%s", port: %s, username: "%s", password: "%s"}',
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: socks5, server: "%s", port: %s, username: "%s", password: "%s"',
 				p.name, p.server, p.port, p.username or "", p.password or "")
+			if fp and fp ~= "" then s = s .. string.format(', client-fingerprint: "%s"', fp) end
+			return s .. "}"
 		end
 	},
 	http = {
 		required = {},
-		output = function(p)
+		output = function(p, fp)
 			local base = string.format('  - {name: "%s", type: http, server: "%s", port: %s',
 				p.name, p.server, p.port)
 			if p.username and p.username ~= "" then
 				base = base .. string.format(', username: "%s", password: "%s"', p.username, p.password or "")
 			end
+			if fp and fp ~= "" then base = base .. string.format(', client-fingerprint: "%s"', fp) end
 			return base .. "}"
 		end
 	}
@@ -484,7 +505,7 @@ local function save_rules_to_lines(list, lines)
 end
 
 -- Write managed proxies to separate provider file (no YAML anchors)
-local function write_provider_file(list)
+local function write_provider_file(list, fingerprint)
 	local path = nm_provider_path()
 	local dir = path:match("^(.+)/[^/]+$") or "/"
 	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
@@ -495,7 +516,7 @@ local function write_provider_file(list)
 		table.insert(content, "proxies:")
 		for _, p in ipairs(list) do
 			local schema = SCHEMAS[p.type or "socks5"] or SCHEMAS.socks5
-			table.insert(content, schema.output(p))
+			table.insert(content, schema.output(p, fingerprint))
 		end
 	end
 	return fs.writefile(path, table.concat(content, "\n") .. "\n")
@@ -970,6 +991,36 @@ HANDLERS["load"] = function()
 	})
 end
 
+-- Get client-fingerprint: migrate from global config → UCI, fallback to UCI default
+local function get_fingerprint(lines)
+	local c = uci_cursor()
+	-- 1. Check main config for deprecated global-client-fingerprint
+	local global_fp = nil
+	for _, line in ipairs(lines) do
+		local fp = line:match("^%s*global%-client%-fingerprint:%s*(.+)")
+		if fp then global_fp = trim(fp); break end
+	end
+	-- 2. If found, migrate to UCI and mark for deletion
+	if global_fp and global_fp ~= "" then
+		c:set("nodemanager", "main", "fingerprint", global_fp)
+		c:commit("nodemanager")
+	end
+	-- 3. Read from UCI (includes migrated or default value)
+	local fp = c:get_first("nodemanager", "main", "fingerprint") or ""
+	return fp, (global_fp ~= nil)
+end
+
+-- Remove global-client-fingerprint line from config
+local function strip_global_fingerprint(lines)
+	local result = {}
+	for _, line in ipairs(lines) do
+		if not line:match("^%s*global%-client%-fingerprint:") then
+			table.insert(result, line)
+		end
+	end
+	return result
+end
+
 HANDLERS["save_proxies"] = function()
 	local input = json_in()
 	local list = input.proxies
@@ -993,8 +1044,10 @@ HANDLERS["save_proxies"] = function()
 			return json_out({ok = false, err = string.format("Row %d: %s", i, err)})
 		end
 	end
-	-- 1. Write provider file (separate file)
-	write_provider_file(list)
+	-- 0. Read client-fingerprint from UCI for per-proxy injection
+	local fingerprint = get_fingerprint(lines)
+	-- 1. Write provider file (separate file, with fingerprint)
+	write_provider_file(list, fingerprint)
 	-- 2. Clean inline managed proxies from main config
 	lines = save_proxies_to_lines({}, lines)
 	-- 3. Parse dialer-proxy from anchor definition
