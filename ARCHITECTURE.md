@@ -137,6 +137,20 @@ proxy-groups:
 
 > `nm-nodes` 是系统内部 provider，机场管理页面自动过滤不显示。
 
+## Bind IP 规则管理
+
+节点的 Bind IP 保存为 `config.yaml` → `rules:` 段的 `SRC-IP-CIDR` 规则：
+
+```yaml
+rules:
+  - SRC-IP-CIDR,192.168.5.101/32,🇺🇲 S5 US01   # 自动生成
+  - RULE-SET,proxylite,🚀 默认代理               # 锚点行
+```
+
+**保存策略（幂等）**：
+1. 扫描 `rules:` 段，只删除**托管节点名**对应的 SRC-IP 规则（用户手动添加的非托管规则不受影响）
+2. 在 `RULE-SET,proxylite` 行前面插入新规则（找不到则回退到段末尾）
+
 ## YAML 解析策略
 
 纯 Lua `string.match` 行扫描，无第三方 YAML 库：
