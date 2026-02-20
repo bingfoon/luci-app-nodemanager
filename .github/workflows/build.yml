@@ -2,9 +2,6 @@ name: Build luci-app-nodemanager + zh-cn i18n (SDK 24.10.2)
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["**"]
-  pull_request:
 
 jobs:
   build:
