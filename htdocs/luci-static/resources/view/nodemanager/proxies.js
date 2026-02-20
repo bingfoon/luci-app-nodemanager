@@ -12,12 +12,16 @@ return view.extend({
 	pageSize: 50,
 
 	load: function() {
-		return nm.call('load').then(function(resp) {
-			return (resp && resp.ok) ? resp.data : {};
+		return nm.checkDevice().then(function(dev) {
+			if (!dev.allowed) return { _deviceBlocked: true, _deviceInfo: dev };
+			return nm.call('load').then(function(resp) {
+				return (resp && resp.ok) ? resp.data : {};
+			});
 		});
 	},
 
 	render: function(data) {
+		if (data._deviceBlocked) return nm.renderDeviceBlock(data._deviceInfo);
 		var self = this;
 		self.proxies = data.proxies || [];
 		self.status = data.status || {};

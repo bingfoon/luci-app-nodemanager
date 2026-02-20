@@ -40,10 +40,11 @@ luci-app-nodemanager/
 │       └── about.js                  # 关于页
 ├── root/usr/
 │   ├── lib/lua/luci/controller/
-│   │   └── nodemanager.lua           # 后端核心 (~1420 行，全部逻辑)
+│   │   └── nodemanager.lua           # 后端核心 (~1510 行，全部逻辑)
 │   └── share/
 │       ├── nodemanager/
-│       │   └── config.template.yaml  # 配置模板 (每次保存时重建骨架)
+│       │   ├── config.template.yaml  # 配置模板 (每次保存时重建骨架)
+│       │   └── device_policy.json    # 设备策略 (白名单/黑名单/开放)
 │       ├── luci/menu.d/
 │       │   └── luci-app-nodemanager.json   # 菜单注册 (4 个子页面)
 │       └── rpcd/acl.d/
@@ -74,6 +75,7 @@ luci-app-nodemanager/
 | `service` | POST | `{cmd: "start/stop/restart"}` | `{status}` | 服务控制 |
 | `get_logs` | GET | — | `{log}` | 获取 nikki 日志 |
 | `debug_dns` | GET | — | `{dns_parsed, raw_lines}` | DNS 调试信息 |
+| `check_device` | GET | — | `{allowed, board, models, message}` | 设备型号校验 |
 
 ## 响应格式
 
@@ -213,6 +215,26 @@ UI 显示时 `parse_bindmap` 统一剥离 CIDR 后缀。
 2. **列表项检测**：`^%s*-%s*{` 匹配行内 YAML 对象
 3. **值提取**：双 pattern `'key:%s*"([^"]*)"' or 'key:%s*([^,}]+)'`
 4. **写回策略**：构建新行数组 → 替换 section 内容 → `table.concat(lines, "\n")`
+
+## 设备策略 (Device Policy)
+
+通过 `/usr/share/nodemanager/device_policy.json` 控制插件可用的设备型号：
+
+```json
+{"mode": "whitelist", "models": ["GL-MT3000", "Xiaomi AX9000"], "message": ""}
+```
+
+| mode | 行为 |
+|------|------|
+| `open` | 不限制（默认） |
+| `whitelist` | 仅 models 中的型号可用 |
+| `blacklist` | 禁止 models 中的型号 |
+
+**双重拦截**：
+1. **后端**：`api()` 入口检查 `check_device()`，不通过则返回 `{ok: false, err: "unsupported_device"}`
+2. **前端**：每个页面 `load()` 时调用 `check_device` API，不通过则渲染 🚫 提示页（含二维码）
+
+> 设备型号读取自 `/tmp/sysinfo/model`，使用子串匹配。`check_device` action 本身不受拦截。
 
 ## 安全模型
 

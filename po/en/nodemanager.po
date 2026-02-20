@@ -199,3 +199,15 @@ msgstr ""
 
 msgid "Select All"
 msgstr ""
+
+msgid "This plugin is not supported on the current device"
+msgstr ""
+
+msgid "Current device"
+msgstr ""
+
+msgid "Supported models"
+msgstr ""
+
+msgid "Unknown"
+msgstr ""

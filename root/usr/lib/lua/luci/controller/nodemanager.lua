@@ -23,6 +23,13 @@ local HANDLERS = {}
 
 function api()
 	local action = http.formvalue("action") or ""
+	-- Device policy check (allow check_device action to pass through)
+	if action ~= "check_device" then
+		local dev_ok = check_device()
+		if not dev_ok then
+			return json_out({ok = false, err = "unsupported_device"})
+		end
+	end
 	local fn = HANDLERS[action]
 	if not fn then
 		return json_out({ok = false, err = "unknown action: " .. action})
@@ -47,6 +54,29 @@ local function json_in()
 	local raw = http.content()
 	if not raw or raw == "" then return {} end
 	return require("luci.jsonc").parse(raw) or {}
+end
+
+-- ============================================================
+-- Device Policy
+-- ============================================================
+local DEVICE_POLICY_PATH = "/usr/share/nodemanager/device_policy.json"
+
+local function check_device()
+	local raw = fs.readfile(DEVICE_POLICY_PATH)
+	if not raw then return true end
+	local policy = require("luci.jsonc").parse(raw)
+	if not policy or policy.mode == "open" then return true end
+
+	local board = trim(fs.readfile("/tmp/sysinfo/model") or "")
+	local matched = false
+	for _, model in ipairs(policy.models or {}) do
+		if board:find(model, 1, true) then matched = true; break end
+	end
+
+	local allowed = (policy.mode == "whitelist" and matched)
+	             or (policy.mode == "blacklist" and not matched)
+	if allowed then return true end
+	return false, board, policy
 end
 
 local function http_get_json(url)
@@ -1236,6 +1266,19 @@ HANDLERS["load"] = function()
 				end
 				return s
 			end)()
+		}
+	})
+end
+
+HANDLERS["check_device"] = function()
+	local ok, board, policy = check_device()
+	json_out({
+		ok = true,
+		data = {
+			allowed = ok,
+			board   = board or trim(fs.readfile("/tmp/sysinfo/model") or ""),
+			models  = policy and policy.models or {},
+			message = policy and policy.message or ""
 		}
 	})
 end

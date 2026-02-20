@@ -200,3 +200,15 @@ msgstr "确定删除 %d 个选中节点？"
 
 msgid "Select All"
 msgstr "全选"
+
+msgid "This plugin is not supported on the current device"
+msgstr "此插件不支持当前设备"
+
+msgid "Current device"
+msgstr "当前设备"
+
+msgid "Supported models"
+msgstr "支持型号"
+
+msgid "Unknown"
+msgstr "未知"
