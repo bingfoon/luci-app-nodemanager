@@ -150,7 +150,7 @@ proxy-groups:
 ② 读取当前 config.yaml (用户数据)
 ③ 段级复制: proxy-providers, proxies 从当前配置 → 模板
 ④ DNS 校验: 如果 nameserver key 结构与模板一致 → 保留用户 DNS 地址
-⑤ 注入: nm-nodes provider 条目 + SRC-IP 绑定规则
+⑤ 注入: nm-nodes provider 条目 + bind proxy-groups + SRC-IP-CIDR 绑定规则
 ⑥ 写回 config.yaml
 ```
 
@@ -164,18 +164,46 @@ proxy-groups:
 
 ## Bind IP 规则管理
 
-节点的 Bind IP 保存为 `config.yaml` → `rules:` 段的 `SRC-IP-CIDR` 规则。
-规则中的代理名必须包含 `[NM] ` 前缀，与 provider 的 `additional-prefix` 一致：
+节点的 Bind IP 通过两部分实现：
+
+### Bind Proxy-Group（间接引用）
+
+Mihomo 在验证 rules 时 provider 尚未加载，因此 SRC-IP-CIDR 规则不能直接引用 provider 代理。
+`inject_bind_groups` 为每个有 bindip 的代理创建一个中间 proxy-group：
+
+```yaml
+proxy-groups:
+  # 自动生成：精确匹配 provider 中的单个代理
+  - {name: "🇺🇸 S5 US01", type: select, use: [nm-nodes], filter: "^\\[NM\\] 🇺🇸 S5 US01$"}
+  - {name: 🏠 住宅节点, type: select, use: [nm-nodes]}    # 模板中的全选组
+```
+
+### SRC-IP-CIDR 规则
+
+规则引用 bind group 名称（=代理原名，无 `[NM] ` 前缀）：
 
 ```yaml
 rules:
-  - SRC-IP-CIDR,192.168.5.101/32,[NM] 🇺🇲 S5 US01   # 自动生成
-  - RULE-SET,ai,🤖 ChatGPT                            # 锚点行
+  - SRC-IP-CIDR,192.168.5.101/32,🇺🇸 S5 US01   # 自动生成
+  - RULE-SET,ai,🤖 ChatGPT                       # 锚点行
 ```
 
-**保存策略（幂等）**：
-1. 扫描 `rules:` 段，只删除**托管节点名**对应的 SRC-IP 规则（兼容带/不带 `[NM] ` 前缀）
-2. 在 `RULE-SET,ai` 行前面插入新规则（找不到则回退到段末尾）
+### 智能 CIDR 推断
+
+用户只需输入纯 IP，`normalize_bindip` 根据尾部零字节自动推断掩码。
+UI 显示时 `parse_bindmap` 统一剥离 CIDR 后缀。
+
+| 用户输入 | 存储 | UI 显示 |
+|---------|------|--------|
+| `192.168.5.101` | `/32` | `192.168.5.101` |
+| `192.168.5.0` | `/24` | `192.168.5.0` |
+| `192.168.0.0` | `/16` | `192.168.0.0` |
+
+### 保存策略（幂等）
+
+1. 扫描 `proxy-groups:` 段，删除所有与托管节点同名的 bind group，重新生成
+2. 扫描 `rules:` 段，删除托管节点对应的 SRC-IP-CIDR 规则（兼容带/不带 `[NM] ` 前缀）
+3. 在 `RULE-SET,ai` 行前面插入新规则（找不到则回退到段末尾）
 
 ## YAML 解析策略
 

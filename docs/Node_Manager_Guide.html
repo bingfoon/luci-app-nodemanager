@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Manager 使用说明</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 {
+            font-size: 2em;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 0.3em;
+        }
+        h2 {
+            font-size: 1.5em;
+            margin-top: 1.5em;
+        }
+        h3 {
+            font-size: 1.2em;
+        }
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 1em 0;
+            padding: 0.5em 1em;
+            background-color: #ecf0f1;
+            border-radius: 4px;
+        }
+        hr {
+            border: none;
+            border-top: 2px solid #ddd;
+            margin: 2em 0;
+        }
+        ol, ul {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+        li {
+            margin: 0.5em 0;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 1em;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+        }
+        table th, table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        table th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        strong {
+            color: #2c3e50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Node Manager 使用说明</h1>
+
+<blockquote>
+<p>本文档面向首次接触的新手用户，帮助你快速上手管理住宅代理节点。<br>所有操作都在路由器的网页管理后台完成，不需要任何命令行知识。</p>
+</blockquote>
+
+<hr>
+
+<h2>目录</h2>
+
+<ol>
+<li><a href="#section-1">安装插件</a></li>
+<li><a href="#section-2">找到插件入口</a></li>
+<li><a href="#section-3">认识界面</a></li>
+<li><a href="#section-4">查看运行状态</a></li>
+<li><a href="#section-5">添加代理节点</a></li>
+<li><a href="#section-6">批量导入节点</a></li>
+<li><a href="#section-7">编辑和删除节点</a></li>
+<li><a href="#section-8">调整节点顺序（拖拽排序）</a></li>
+<li><a href="#section-9">绑定设备 IP</a></li>
+<li><a href="#section-10">测试节点速度</a></li>
+<li><a href="#section-11">导出备份</a></li>
+<li><a href="#section-12">管理机场订阅</a></li>
+<li><a href="#section-13">管理 DNS 服务器</a></li>
+<li><a href="#section-14">常见问题</a></li>
+</ol>
+
+<hr>
+
+<h2 id="section-1">1. 安装插件</h2>
+
+<h3>准备工作</h3>
+
+<p>你需要准备好以下东西：</p>
+
+<ul>
+<li>一台已刷好 ImmortalWrt 系统的路由器（24.10 或更高版本）</li>
+<li>路由器上已安装好 Mihomo（也叫 nikki）</li>
+<li>插件安装包文件（文件名类似 <code>luci-app-nodemanager_xxx.ipk</code>）</li>
+</ul>
+
+<h3>安装步骤</h3>
+
+<ol>
+<li>打开电脑浏览器，在地址栏输入路由器的管理地址（一般是 <code>192.168.8.1</code>），然后输入密码登录</li>
+<li>在顶部菜单栏找到 <strong>系统 → Software（软件包）</strong></li>
+<li>点击页面中的 <strong>上传软件包（Upload Package）</strong> 按钮</li>
+<li>在弹出的窗口中，选择你下载好的 <code>.ipk</code> 安装包文件</li>
+<li>点击 <strong>安装（Install）</strong> 按钮，等待安装完成</li>
+<li>安装完成后，<strong>刷新一下浏览器页面</strong>（按 <code>Ctrl + F5</code> 或 <code>Cmd + Shift + R</code>），新菜单就会出现</li>
+</ol>
+
+<blockquote>
+<p>💡 <strong>小提示</strong>：如果安装后菜单没有出现，试试退出登录后重新登录，或者清除浏览器缓存后再刷新。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-2">2. 找到插件入口</h2>
+
+<p>安装成功后，在路由器管理页面的顶部菜单栏中：</p>
+
+<p><strong>服务 → Node Manager</strong></p>
+
+<p>点进去就能看到插件界面了。</p>
+
+<hr>
+
+<h2 id="section-3">3. 认识界面</h2>
+
+<p>插件一共有 <strong>4 个页面</strong>，可以通过顶部的标签页切换：</p>
+
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>作用</th>
+<th>简单说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Proxies</strong>（节点管理）</td>
+<td>管理你的代理节点</td>
+<td>最常用的页面，添加、编辑、删除、测速都在这里</td>
+</tr>
+<tr>
+<td><strong>Providers</strong>（机场订阅）</td>
+<td>管理机场订阅地址</td>
+<td>如果你有机场订阅链接，在这里添加</td>
+</tr>
+<tr>
+<td><strong>DNS</strong></td>
+<td>管理域名解析服务器</td>
+<td>一般不需要修改</td>
+</tr>
+<tr>
+<td><strong>About</strong>（关于）</td>
+<td>关于我们</td>
+<td>显示项目信息和联系方式</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="section-4">4. 查看运行状态</h2>
+
+<p>每个页面的顶部都有一个 <strong>状态栏</strong>，显示底层代理服务（nikki / Mihomo）的运行状态：</p>
+
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🟢 <strong>nikki running</strong></td>
+<td>代理服务正在运行，一切正常</td>
+</tr>
+<tr>
+<td>🔴 <strong>nikki stopped</strong></td>
+<td>代理服务已停止，节点不会生效</td>
+</tr>
+</tbody>
+</table>
+
+<p>状态栏右侧有一个按钮：</p>
+
+<ul>
+<li>代理服务<strong>运行中</strong>时，按钮显示 <strong>Restart（重启）</strong> —— 修改配置后需要点这个按钮让新配置生效</li>
+<li>代理服务<strong>已停止</strong>时，按钮显示 <strong>Start（启动）</strong> —— 点击启动代理服务</li>
+</ul>
+
+<blockquote>
+<p>⚠️ <strong>重要提醒</strong>：每次<strong>保存</strong>配置后，都需要点击 <strong>重启</strong> 按钮，新的配置才会真正生效！</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-5">5. 添加代理节点</h2>
+
+<p>进入 <strong>Proxies</strong> 页面，你会看到一个表格和一排工具按钮。</p>
+
+<h3>手动添加一个节点</h3>
+
+<ol>
+<li>点击工具栏的 <strong>➕ Add（添加）</strong> 按钮</li>
+<li>页面底部会出现一行空白的新节点，光标会自动定位到名称栏</li>
+<li>填写以下信息：</li>
+</ol>
+
+<table>
+<thead>
+<tr>
+<th>栏目</th>
+<th>必填？</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong>（名称）</td>
+<td>可选</td>
+<td>给这个节点起个名字，比如"美国01"。留空的话系统会自动起名（NM-001, NM-002…）</td>
+</tr>
+<tr>
+<td><strong>Server</strong>（服务器地址）</td>
+<td>✅ 必填</td>
+<td>代理服务器的地址，比如 <code>1.2.3.4</code> 或者 <code>example.com</code></td>
+</tr>
+<tr>
+<td><strong>Port</strong>（端口）</td>
+<td>✅ 必填</td>
+<td>代理服务的端口号，比如 <code>1080</code></td>
+</tr>
+<tr>
+<td><strong>Username</strong>（用户名）</td>
+<td>可选</td>
+<td>如果代理需要登录验证，填写用户名</td>
+</tr>
+<tr>
+<td><strong>Password</strong>（密码）</td>
+<td>可选</td>
+<td>如果代理需要登录验证，填写密码。密码默认以圆点显示，点击旁边的 👁 图标可以切换显示/隐藏</td>
+</tr>
+<tr>
+<td><strong>Bind IPs</strong>（绑定 IP）</td>
+<td>可选</td>
+<td>指定哪些设备走这个节点，后面会详细说明</td>
+</tr>
+</tbody>
+</table>
+
+<ol start="4">
+<li>填好后，点击 <strong>💾 Save（保存）</strong> 按钮</li>
+<li>最后别忘了点状态栏的 <strong>Restart（重启）</strong> 让配置生效</li>
+</ol>
+
+<hr>
+
+<h2 id="section-6">6. 批量导入节点</h2>
+
+<p>如果你有很多节点需要添加，一个个手动填太麻烦了。你可以使用<strong>批量导入</strong>功能，一次性导入多个节点。</p>
+
+<h3>导入步骤</h3>
+
+<ol>
+<li>点击工具栏的 <strong>📥 Import（导入）</strong> 按钮</li>
+<li>弹出一个导入窗口，你有两种方式提供节点信息：
+
+<p><strong>方式 A：直接粘贴文本</strong></p>
+
+<p>把节点信息直接粘贴到大文本框里。插件会<strong>自动识别格式</strong>，你不用管是什么格式，直接粘贴就行。</p>
+
+<p><strong>方式 B：选择文件</strong></p>
+
+<p>如果你有一个节点配置文件（<code>.json</code>、<code>.txt</code>、<code>.yaml</code>、<code>.yml</code> 都行），点击文本框下面的<strong>选择文件</strong>按钮来导入。</p>
+</li>
+<li>选择导入模式：
+<ul>
+<li><strong>追加到现有节点</strong>（默认）：新导入的节点会添加到已有节点的后面</li>
+<li><strong>替换现有节点</strong>：清空所有现有节点，只保留新导入的</li>
+</ul>
+</li>
+<li>点击 <strong>Import（导入）</strong> 按钮</li>
+<li>检查导入结果是否正确</li>
+<li>确认无误后，点击 <strong>💾 Save（保存）</strong></li>
+<li>最后点状态栏的 <strong>Restart（重启）</strong> 让配置生效</li>
+</ol>
+
+<h3>支持的导入格式</h3>
+
+<p>你不用记住这些格式，直接粘贴就好，插件会自动识别：</p>
+
+<p><strong>格式一：最简单的一行一个</strong></p>
+
+<pre><code>1.2.3.4:1080
+5.6.7.8:1080</code></pre>
+
+<p><strong>格式二：带用户名密码</strong></p>
+
+<pre><code>user:pass@1.2.3.4:1080
+admin:123456@5.6.7.8:1080</code></pre>
+
+<p><strong>格式三：带名称（用 # 号标注）</strong></p>
+
+<pre><code>1.2.3.4:1080 # 美国节点
+5.6.7.8:1080 # 日本节点</code></pre>
+
+<p><strong>格式四：URL 链接格式</strong></p>
+
+<pre><code>socks5://user:pass@1.2.3.4:1080#美国节点
+http://user:pass@5.6.7.8:8080#日本节点</code></pre>
+
+<p><strong>格式五：JSON 格式</strong></p>
+
+<pre><code>[
+  {"name": "美国01", "type": "socks5", "server": "1.2.3.4", "port": 1080, "username": "user", "password": "pass"},
+  {"name": "日本01", "type": "socks5", "server": "5.6.7.8", "port": 1080}
+]</code></pre>
+
+<p><strong>格式六：YAML 格式（常见于 Clash 配置）</strong></p>
+
+<pre><code>- {name: 美国01, type: socks5, server: 1.2.3.4, port: 1080, username: user, password: pass}
+- {name: 日本01, type: socks5, server: 5.6.7.8, port: 1080}</code></pre>
+
+<blockquote>
+<p>💡 <strong>提示</strong>：单次导入最多支持 <strong>500 个节点</strong>。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-7">7. 编辑和删除节点</h2>
+
+<h3>编辑节点</h3>
+
+<p>直接在表格中点击你想修改的字段，修改完成后点击 <strong>💾 Save（保存）</strong>。</p>
+
+<h3>删除单个节点</h3>
+
+<p>点击节点行右侧的 <strong>🗑️</strong> 删除按钮，确认后该节点会被移除。</p>
+
+<h3>批量删除多个节点</h3>
+
+<ol>
+<li>通过每行左侧的 <strong>☑ 勾选框</strong> 选中你要删除的节点
+<ul>
+<li>想全选当前页所有节点？点击表头的全选勾选框即可</li>
+</ul>
+</li>
+<li>选好后，工具栏的 <strong>🗑️ Batch Delete（批量删除）</strong> 按钮会变为可用状态，并且会显示已选中的数量</li>
+<li>点击 <strong>🗑️ Batch Delete</strong> 按钮，确认删除</li>
+</ol>
+
+<blockquote>
+<p>⚠️ 删除后记得点 <strong>💾 Save（保存）</strong> ，否则刷新页面后被删除的节点又会回来。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-8">8. 调整节点顺序（拖拽排序）</h2>
+
+<p>你可以通过拖拽来调整节点的前后顺序：</p>
+
+<ol>
+<li>用鼠标按住节点行左侧的 <strong>☰</strong> 拖拽手柄</li>
+<li>按住不放，上下移动鼠标</li>
+<li>松开鼠标，节点就会被放到新的位置</li>
+</ol>
+
+<blockquote>
+<p>💡 只有 <strong>☰</strong> 图标可以拖拽，点击其他地方不会触发拖拽，所以不会影响你编辑文字。</p>
+<p>调整顺序后记得点 <strong>💾 Save（保存）</strong>。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-9">9. 绑定设备 IP</h2>
+
+<p>这个功能可以让你指定某台设备（电脑、手机等）的上网流量通过某个特定的代理节点。</p>
+
+<h3>怎么用</h3>
+
+<p>在节点行的 <strong>Bind IPs</strong> 栏中输入设备的 IP 地址，多个设备用<strong>英文逗号</strong>隔开。</p>
+
+<h3>示例</h3>
+
+<table>
+<thead>
+<tr>
+<th>输入</th>
+<th>效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>192.168.5.101</code></td>
+<td>这一台设备的流量走此节点</td>
+</tr>
+<tr>
+<td><code>192.168.5.101, 192.168.5.102</code></td>
+<td>这两台设备的流量都走此节点</td>
+</tr>
+<tr>
+<td><code>192.168.5.0</code></td>
+<td>整个 192.168.5.x 网段的所有设备都走此节点（系统会自动识别为一个子网）</td>
+</tr>
+</tbody>
+</table>
+
+<h3>怎么找到设备的 IP 地址？</h3>
+
+<ul>
+<li><strong>方法一</strong>：在路由器管理页面的首页或状态页面，通常可以看到所有已连接设备的 IP 地址</li>
+<li><strong>方法二</strong>：在设备上查看：
+<ul>
+<li>Windows：打开命令提示符，输入 <code>ipconfig</code></li>
+<li>Mac：打开系统设置 → 网络</li>
+<li>手机：在 Wi-Fi 设置中查看</li>
+</ul>
+</li>
+</ul>
+
+<blockquote>
+<p>填好后记得点 <strong>💾 Save（保存）</strong>，再点 <strong>Restart（重启）</strong> 生效。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-10">10. 测试节点速度</h2>
+
+<p>在使用节点之前，可以先测试一下节点的连通性和速度。</p>
+
+<h3>测试单个节点</h3>
+
+<p>点击节点行右侧的 <strong>⚡</strong> 按钮，等待几秒钟，会显示延迟时间：</p>
+
+<table>
+<thead>
+<tr>
+<th>显示颜色</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🟢 绿色数字（例如 <code>120ms</code>）</td>
+<td>速度很好</td>
+</tr>
+<tr>
+<td>🟡 黄色数字（例如 <code>350ms</code>）</td>
+<td>速度一般</td>
+</tr>
+<tr>
+<td>🔴 红色数字或 <code>Timeout</code></td>
+<td>连接慢或连不上</td>
+</tr>
+</tbody>
+</table>
+
+<h3>测试所有节点</h3>
+
+<p>点击工具栏的 <strong>⚡ Test All（全部测试）</strong> 按钮，系统会逐个测试所有节点。测试过程中按钮会显示进度（例如 <code>⚡ 5/20</code>）。</p>
+
+<blockquote>
+<p>⚠️ 测速功能需要在代理服务<strong>运行中</strong>时才能使用（状态栏显示 🟢）。如果服务未运行，测速按钮会变灰、无法点击。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-11">11. 导出备份</h2>
+
+<p>你可以把当前所有节点导出保存，方便备份或者迁移到另一台路由器。</p>
+
+<ol>
+<li>点击工具栏的 <strong>📤 Export（导出）</strong> 按钮</li>
+<li>浏览器会自动下载一个名为 <code>nodemanager-proxies.json</code> 的文件</li>
+<li>这个文件包含了你所有节点的信息（名称、地址、端口、用户名、密码等）</li>
+</ol>
+
+<h3>怎么恢复备份？</h3>
+
+<p>在另一台路由器上安装好插件后，用<strong>导入</strong>功能（参看<a href="#section-6">第 6 节</a>），选择之前导出的 JSON 文件，选择"替换现有节点"导入即可。</p>
+
+<hr>
+
+<h2 id="section-12">12. 管理机场订阅</h2>
+
+<p>如果你使用的是"机场"服务（提供订阅链接的代理服务商），可以在 <strong>Providers</strong> 页面管理订阅。</p>
+
+<h3>添加订阅</h3>
+
+<ol>
+<li>切换到 <strong>Providers</strong> 标签页</li>
+<li>点击 <strong>➕ Add（添加）</strong> 按钮</li>
+<li>填写以下信息：
+<ul>
+<li><strong>Provider Name</strong>（订阅名称）：随便起个名字，比如 <code>我的机场</code></li>
+<li><strong>Subscription URL</strong>（订阅地址）：粘贴机场提供给你的订阅链接</li>
+</ul>
+</li>
+<li>点击 <strong>💾 Save（保存）</strong></li>
+<li>点状态栏的 <strong>Restart（重启）</strong> 生效</li>
+</ol>
+
+<h3>删除订阅</h3>
+
+<p>点击订阅行右侧的 <strong>🗑️</strong> 按钮，确认后删除，记得保存。</p>
+
+<blockquote>
+<p>💡 机场订阅的节点和你手动添加的节点是<strong>完全隔离</strong>的，互不影响。</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-13">13. 管理 DNS 服务器</h2>
+
+<p>切换到 <strong>DNS</strong> 标签页，你可以管理不同用途的 DNS 服务器。</p>
+
+<blockquote>
+<p>💡 <strong>什么是 DNS？</strong> 简单来说，DNS 就是帮你把网址（比如 <code>google.com</code>）翻译成电脑能理解的数字地址的服务。一般情况下不需要修改此页面的设置。</p>
+</blockquote>
+
+<h3>DNS 分类说明</h3>
+
+<table>
+<thead>
+<tr>
+<th>分类</th>
+<th>作用</th>
+<th>什么时候需要改？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Default Nameserver</strong></td>
+<td>最基础的 DNS，用来解析其他 DNS 服务的地址</td>
+<td>一般不需要改</td>
+</tr>
+<tr>
+<td><strong>Proxy Server Nameserver</strong></td>
+<td>专门解析代理服务器地址的 DNS</td>
+<td>一般不需要改</td>
+</tr>
+<tr>
+<td><strong>Direct Nameserver</strong></td>
+<td>直连流量使用的 DNS</td>
+<td>一般不需要改</td>
+</tr>
+<tr>
+<td><strong>Nameserver</strong></td>
+<td>主要 DNS，大部分域名依靠它解析</td>
+<td>想换 DNS 的话改这里</td>
+</tr>
+</tbody>
+</table>
+
+<h3>操作方法</h3>
+
+<ul>
+<li>每个分类区域右上角有 <strong>+ Add（添加）</strong> 按钮，点击可以添加新的 DNS 地址</li>
+<li>每行右侧有 <strong>🗑️</strong> 按钮可以删除</li>
+<li>每行的 <strong>⚡</strong> 按钮可以测试该 DNS 的连通性和速度</li>
+<li>修改完毕后点 <strong>💾 Save（保存）</strong>，然后点 <strong>Restart（重启）</strong> 生效</li>
+</ul>
+
+<h3>常用 DNS 地址参考</h3>
+
+<table>
+<thead>
+<tr>
+<th>DNS 地址</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>223.5.5.5</code></td>
+<td>阿里 DNS（国内推荐）</td>
+</tr>
+<tr>
+<td><code>119.29.29.29</code></td>
+<td>腾讯 DNS（国内推荐）</td>
+</tr>
+<tr>
+<td><code>8.8.8.8</code></td>
+<td>Google DNS</td>
+</tr>
+<tr>
+<td><code>https://dns.alidns.com/dns-query</code></td>
+<td>阿里 DNS 加密版</td>
+</tr>
+<tr>
+<td><code>https://doh.pub/dns-query</code></td>
+<td>腾讯 DNS 加密版</td>
+</tr>
+<tr>
+<td><code>https://dns.google/dns-query</code></td>
+<td>Google DNS 加密版</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="section-14">14. 常见问题</h2>
+
+<h3>Q: 保存后节点没生效怎么办？</h3>
+
+<p>A: 保存配置后，需要点击状态栏的 <strong>Restart（重启）</strong> 按钮，新配置才会真正生效。这是最常被忽略的一步！</p>
+
+<h3>Q: 测速按钮点不了（变灰了）怎么办？</h3>
+
+<p>A: 测速需要代理服务处于运行状态（状态栏显示 🟢 绿色）。如果显示红色，先点击 <strong>Start（启动）</strong> 按钮启动服务。</p>
+
+<h3>Q: 导入后显示的节点名称不对？</h3>
+
+<p>A: 导入时插件会尽量从你粘贴的内容中提取名称。如果名称不对，可以直接在表格中点击名称栏修改，改完保存即可。</p>
+
+<h3>Q: 绑定了 IP 但设备没走指定节点？</h3>
+
+<p>A: 请检查以下几点：</p>
+
+<ol>
+<li>确认 IP 地址填写正确</li>
+<li>确认已经点击了<strong>保存</strong></li>
+<li>确认已经点击了<strong>重启</strong></li>
+<li>确认设备的实际 IP 和你填写的一致</li>
+</ol>
+
+<h3>Q: 最多能管理多少个节点？</h3>
+
+<p>A: 没有严格限制。实际测试中，200 个以上的节点也能流畅运行。</p>
+
+<h3>Q: 不知道自己的节点信息是什么格式？</h3>
+
+<p>A: 不用担心！直接粘贴你拿到的节点信息即可，插件会<strong>自动识别格式</strong>（支持 JSON、YAML、URL、纯文本等多种格式）。如果无法识别，调整一下格式即可——最简单的就是一行一个 <code>地址:端口</code> 的写法。</p>
+
+<h3>Q: 机场订阅和手动添加的节点会冲突吗？</h3>
+
+<p>A: 不会。机场订阅的节点和你在 Proxies 页面手动添加的节点是<strong>完全隔离</strong>的，各走各的通道，互不影响。</p>
+
+<h3>Q: 换了一台路由器，怎么迁移节点？</h3>
+
+<p>A: 在旧路由器上点<strong>导出</strong>按钮下载备份文件，然后在新路由器上安装好插件，用<strong>导入</strong>功能选择备份文件导入即可。</p>
+
+<hr>
+
+<blockquote>
+<p>📝 如果你在使用过程中遇到其他问题，欢迎加入「AI搞钱英雄会」和我们交流（扫描 About 页面的二维码加入）。</p>
+</blockquote>
+
+</body>
+</html>
