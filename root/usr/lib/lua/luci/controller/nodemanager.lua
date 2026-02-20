@@ -681,10 +681,13 @@ local function parse_dialer_proxy(lines)
 	local in_anchor = false
 	for _, line in ipairs(lines) do
 		if line:match("^s5:%s*&s5") or line:match("^s5:%s*$") then
+			-- Check same line for flow format: s5: &s5 {... dialer-proxy: "xxx" ...}
+			local dp = line:match('dialer%-proxy:%s*"([^"]*)"') or line:match("dialer%-proxy:%s*([^,}]+)")
+			if dp then return trim(dp) end
 			in_anchor = true
 		elseif in_anchor then
 			if line:match("^%S") and not line:match("^%s") then break end
-			local dp = line:match("dialer%-proxy:%s*(.+)")
+			local dp = line:match('dialer%-proxy:%s*"([^"]*)"') or line:match("dialer%-proxy:%s*(.+)")
 			if dp then return trim(dp) end
 		end
 	end
