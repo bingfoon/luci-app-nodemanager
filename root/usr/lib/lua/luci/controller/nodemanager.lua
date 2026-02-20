@@ -1129,10 +1129,9 @@ rebuild_config = function(proxy_list)
 	end
 	-- else: DNS stays as template defaults
 
-	-- 3. Inject managed data
+	-- 3. Inject nm-nodes provider entry (template has proxy-groups already)
 	local dialer = parse_dialer_proxy(tpl_lines)
 	tpl_lines = save_provider_entry_to_lines(tpl_lines, dialer)
-	tpl_lines = save_proxy_group_to_lines(tpl_lines)
 
 	-- 4. SRC-IP bind rules
 	if proxy_list then
