@@ -71,11 +71,16 @@ local function uci_cursor()
 	return uci.cursor()
 end
 
+local _cached_conf_path = nil
+
 local function conf_path()
+	-- Cache: once resolved, don't re-scan (avoids race with write_provider_file)
+	if _cached_conf_path then return _cached_conf_path end
+
 	-- 1. Check UCI nodemanager override
 	local c = uci_cursor()
 	local p = c:get_first("nodemanager", "main", "path")
-	if p and p ~= "" and fs.access(p) then return p end
+	if p and p ~= "" and fs.access(p) then _cached_conf_path = p; return p end
 
 	-- 2. Read from running mihomo/nikki process -f flag (ground truth)
 	local ps = io.popen("ps w 2>/dev/null | grep -E 'mihomo|nikki' | grep -v grep")
@@ -84,7 +89,7 @@ local function conf_path()
 		ps:close()
 		if psout then
 			local fpath = psout:match("%-f%s+(%S+%.ya?ml)")
-			if fpath and fs.access(fpath) then return fpath end
+			if fpath and fs.access(fpath) then _cached_conf_path = fpath; return fpath end
 		end
 	end
 
@@ -94,16 +99,17 @@ local function conf_path()
 	end)
 	if ok_nikki and p and p ~= "" then
 		local candidate = "/etc/nikki/profiles/" .. p .. ".yaml"
-		if fs.access(candidate) then return candidate end
+		if fs.access(candidate) then _cached_conf_path = candidate; return candidate end
 	end
 	-- 4. Scan /etc/nikki/profiles/ for most recently modified .yaml
+	--    EXCLUDE nm_proxies.yaml to avoid race condition with write_provider_file
 	local dir = "/etc/nikki/profiles/"
 	if fs.access(dir) then
 		local entries = fs.dir(dir)
 		if entries then
 			local best, best_mtime = nil, 0
 			for entry in entries do
-				if entry:match("%.ya?ml$") then
+				if entry:match("%.ya?ml$") and entry ~= "nm_proxies.yaml" then
 					local st = fs.stat(dir .. entry)
 					local mt = st and st.mtime or 0
 					if mt > best_mtime then
@@ -112,12 +118,13 @@ local function conf_path()
 					end
 				end
 			end
-			if best then return best end
+			if best then _cached_conf_path = best; return best end
 		end
 	end
 
 	-- 5. Default fallback
-	return "/etc/nikki/profiles/config.yaml"
+	_cached_conf_path = "/etc/nikki/profiles/config.yaml"
+	return _cached_conf_path
 end
 
 local NM_PROVIDER_NAME = "nm-nodes"
