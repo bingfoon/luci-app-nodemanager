@@ -481,6 +481,10 @@ local function save_proxies_to_lines(list, lines)
 end
 
 local function save_rules_to_lines(list, lines)
+	-- Build managed proxy name set for targeted deletion
+	local managed = {}
+	for _, p in ipairs(list) do managed[p.name] = true end
+
 	-- Build SRC-IP / SRC-IP-CIDR rules from bindips
 	local rules = {}
 	for _, p in ipairs(list) do
@@ -496,7 +500,8 @@ local function save_rules_to_lines(list, lines)
 		end
 	end
 
-	-- Find rules section and replace SRC-IP lines
+	-- Only delete SRC-IP rules that reference managed proxy names
+	-- Insert new rules before RULE-SET,proxylite (or end of rules section)
 	local result = {}
 	local in_rules = false
 	local rules_inserted = false
@@ -504,25 +509,47 @@ local function save_rules_to_lines(list, lines)
 		if line:match("^rules:") then
 			in_rules = true
 			table.insert(result, line)
-			-- Insert SRC-IP rules right after "rules:"
-			for _, r in ipairs(rules) do
-				table.insert(result, r)
+		elseif in_rules and line:match("^%S") and not line:match("^%s") then
+			in_rules = false
+			table.insert(result, line)
+		elseif in_rules then
+			-- Check if this is a SRC-IP rule for a managed proxy → skip it
+			local target = line:match("SRC%-IP%-CIDR,[^,]+,(.+)") or line:match("SRC%-IP,([^,]+),(.+)")
+			if target then
+				target = line:match(",([^,]+)$")  -- last field = proxy name
+				if target and managed[trim(target)] then
+					-- Skip: managed proxy SRC-IP rule (will be re-generated)
+				else
+					table.insert(result, line)  -- Keep: user's custom SRC-IP rule
+				end
+			else
+				-- Insert new rules before RULE-SET,proxylite
+				if not rules_inserted and line:match("RULE%-SET,proxylite") then
+					for _, r in ipairs(rules) do table.insert(result, r) end
+					rules_inserted = true
+				end
+				table.insert(result, line)
 			end
-			rules_inserted = true
-		elseif in_rules and line:match("SRC%-IP") then
-			-- Skip old SRC-IP and SRC-IP-CIDR lines
 		else
-			if in_rules and line:match("^%S") and not line:match("^%s") then
-				in_rules = false
-			end
 			table.insert(result, line)
 		end
 	end
 
+	-- Fallback: if proxylite not found, append at end of rules
 	if not rules_inserted and #rules > 0 then
-		-- Append rules section
-		table.insert(result, "rules:")
-		for _, r in ipairs(rules) do table.insert(result, r) end
+		-- Find last rule line and insert before it, or create section
+		local last_rule_idx
+		for i, line in ipairs(result) do
+			if line:match("^rules:") or line:match("^%s+%-") then last_rule_idx = i end
+		end
+		if last_rule_idx then
+			for ri = #rules, 1, -1 do
+				table.insert(result, last_rule_idx + 1, rules[ri])
+			end
+		else
+			table.insert(result, "rules:")
+			for _, r in ipairs(rules) do table.insert(result, r) end
+		end
 	end
 
 	return result

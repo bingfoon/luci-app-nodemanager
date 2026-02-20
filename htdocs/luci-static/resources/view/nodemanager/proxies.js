@@ -250,7 +250,7 @@ return view.extend({
 			]),
 			passCell,
 			E('td', {'class': 'td', 'style': tdS}, [
-				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.8.101'})
+				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.5.101'})
 			]),
 			delayCell,
 			E('td', {'class': 'td', 'style': 'white-space:nowrap;text-align:center;display:flex;gap:4px;justify-content:center;align-items:center;'}, [testBtn, delBtn])

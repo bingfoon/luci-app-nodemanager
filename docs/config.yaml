@@ -14,9 +14,6 @@ proxy-providers:
 
 s5: &s5 {type: socks5, udp: true, dialer-proxy: "🚀 默认代理"}
 proxies:
-  # 落地节点信息从下面开始添加
-  #- { <<: *s5, name: "🇺🇲 S5 US01", server: 你的落地IP, port: 你的端口, username: 你的用户名, password: 你的密码}
-  # 落地节点信息必须添加在这一行上面
   - {name: 直连, type: direct}
 
 mixed-port: 7893
@@ -72,6 +69,8 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 28.0.0.1/8
   fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    - "rule-set:fakeipfilter_domain"
   default-nameserver:
     - 223.5.5.5
     - 120.53.53.53
@@ -81,8 +80,6 @@ dns:
     - https://dns.alidns.com/dns-query?ecs=223.5.5.0/24
   nameserver:
     - https://8.8.8.8/dns-query
-  fake-ip-filter:
-    - "rule-set:fakeipfilter_domain"
  
 proxy-groups:
   - {name: 🚀 默认代理, type: select, proxies: [🔯 香港故转, 🔯 日本故转, 🔯 狮城故转, 🔯 美国故转, ♻️ 香港自动, ♻️ 日本自动, ♻️ 狮城自动, ♻️ 美国自动, ♻️ 自动选择, 🇭🇰 香港节点, 🇯🇵 日本节点, 🇸🇬 狮城节点, 🇺🇲 美国节点, 🌐 全部节点, 直连]}
@@ -118,9 +115,6 @@ rules:
   - RULE-SET,private_ip,直连,no-resolve
   - RULE-SET,private_domain,直连
   - RULE-SET,apple_update_domain,🍎 Apple
-  # 落地节点对应的子网设备添加在下面
-  #- SRC-IP-CIDR,192.168.5.101/32,🇺🇲 S5 US01
-  # 落地节点对应的子网设备添加在上面
   - RULE-SET,proxylite,🚀 默认代理
   - RULE-SET,ai,🤖 ChatGPT
   - RULE-SET,github_domain,👨🏿‍💻 GitHub
