@@ -13,6 +13,7 @@ description: OpenWrt LuCI 插件开发技能 — 涵盖 Lua 后端、LuCI JS 前
 - `htdocs/luci-static/resources/nodemanager/common.js` — 公共模块
 - `root/usr/share/luci/menu.d/*.json` — 菜单配置
 - `root/usr/share/rpcd/acl.d/*.json` — ACL 权限
+- `root/usr/share/nodemanager/config.template.yaml` — 配置模板
 - `po/**/*.po` — 翻译文件
 
 ## 一、LuCI JS View 开发
@@ -132,6 +133,25 @@ local nixio = require "nixio"          -- 底层 I/O (gettimeofday)
 - **运行时副本**：`run/`（`nm_runtime_path()`，Mihomo `-d` 目录下，满足安全限制）
 - `mihomo_home()` 从进程 `-d` 参数自动检测 home 目录
 
+### 模板重建机制
+
+每次 `save_proxies`/`save_providers`/`save_dns` 时，`rebuild_config()` 从模板重建 config.yaml：
+
+```lua
+-- 模板(骨架) + 当前配置(用户数据) → 新 config
+rebuild_config = function(proxy_list)
+    local tpl = read_template_lines()       -- 读模板
+    local cur = read_lines()                -- 读当前配置
+    tpl = copy_section(cur, tpl, "proxy-providers")  -- 保留用户机场
+    tpl = copy_section(cur, tpl, "proxies")           -- 保留手动节点
+    -- DNS: 结构匹配模板则保留用户地址，否则用模板默认
+    -- nm-nodes provider + SRC-IP rules 注入
+    return tpl
+end
+```
+
+**段级归属**: `proxy-providers` 和 `proxies` 从当前配置保留，其余始终从模板。
+
 ---
 
 ## 三、YAML 行级操作
@@ -161,6 +181,20 @@ end
 -- 先尝试带引号，再尝试不带引号
 local name = line:match('name:%s*"([^"]*)"')
           or line:match("name:%s*([^,}]+)")
+```
+
+### ⚠️ Lua 模式转义注意
+
+Lua 中 `-` 是非贪婪量词，用于模式匹配时**必须转义**：
+
+```lua
+-- ❗ 错误："nm-nodes" 中的 - 被解释为量词，匹配失败
+line:match("nm-nodes:")  -- ✘
+
+-- ✅ 正确：转义后匹配
+line:match("nm%-nodes:")  -- ✔
+-- 或动态转义
+line:match(name:gsub("%-", "%%-") .. ":")  -- ✔
 ```
 
 ### 写回 Section

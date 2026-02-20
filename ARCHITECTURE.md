@@ -33,15 +33,17 @@ luci-app-nodemanager/
 │   │   ├── common.js                 # 公共模块: API 调用、状态栏、延迟徽章
 │   │   └── qrcode.png                # 关于页二维码
 │   └── view/nodemanager/
-│       ├── proxies.js                # 节点管理 (CRUD/导入导出/拖拽排序/分页/测速)
+│       ├── proxies.js                # 节点管理 (CRUD/导入导出/拖拽排序/分页/测速/批量删除)
 │       ├── dns.js                    # DNS 服务器管理 (分类管理/测速)
 │       ├── providers.js              # 机场订阅管理
 │       ├── logs.js                   # 日志查看
 │       └── about.js                  # 关于页
 ├── root/usr/
 │   ├── lib/lua/luci/controller/
-│   │   └── nodemanager.lua           # 后端核心 (~1170 行，全部逻辑)
+│   │   └── nodemanager.lua           # 后端核心 (~1420 行，全部逻辑)
 │   └── share/
+│       ├── nodemanager/
+│       │   └── config.template.yaml  # 配置模板 (每次保存时重建骨架)
 │       ├── luci/menu.d/
 │       │   └── luci-app-nodemanager.json   # 菜单注册 (4 个子页面)
 │       └── rpcd/acl.d/
@@ -63,9 +65,9 @@ luci-app-nodemanager/
 | Action | 方法 | 输入 | 输出 | 说明 |
 |--------|------|------|------|------|
 | `load` | GET | — | `{proxies, providers, dns, status, schemas}` | 加载全部数据 |
-| `save_proxies` | POST | `{proxies: [...]}` | `{ok}` | 保存节点到 Provider 文件 |
-| `save_providers` | POST | `{providers: [...]}` | `{ok}` | 保存机场订阅 |
-| `save_dns` | POST | `{dns: {key: [...]}}` | `{ok}` | 保存 DNS 配置 |
+| `save_proxies` | POST | `{proxies: [...]}` | `{ok}` | 保存节点 + 模板重建 |
+| `save_providers` | POST | `{providers: [...]}` | `{ok}` | 保存机场订阅 + 模板重建 |
+| `save_dns` | POST | `{dns: {key: [...]}}` | `{ok}` | 保存 DNS 配置 + 模板重建 |
 | `test_dns` | POST | `{server: "..."}` | `{delay, host}` | DNS 测速（nslookup + 随机域名 + nixio 微秒计时） |
 | `test_proxy` | GET | `?name=...` | `{delay}` | 代理测速（Mihomo API） |
 | `import` | POST | `{text: "..."}` | `[parsed_nodes]` | 多格式智能导入 |
@@ -122,20 +124,41 @@ proxy-providers:
     type: file
     path: nm_proxies.yaml              # 相对于 Mihomo -d 目录
     override:
+      additional-prefix: "[NM] "       # 隔离标记，exclude-filter 匹配
       dialer-proxy: "前置节点名"        # 从 YAML anchor 自动继承
     health-check:
       enable: false
 
 proxy-groups:
-  - name: "🏠住宅节点"
-    type: select
-    use:
-      - nm-nodes
+  - {name: 🏠 住宅节点, type: select, use: [nm-nodes]}
 ```
 
-**隔离性**：`include-all: true` 的代理组 **不会** 包含托管节点。
+**隔离性**：
+- `override.additional-prefix: "[NM] "` 为所有托管节点名添加前缀
+- 其他代理组通过 `exclude-filter: "[NM]"` 排除，即使 `include-all: true` 也不会包含
 
 > `nm-nodes` 是系统内部 provider，机场管理页面自动过滤不显示。
+
+## 模板重建机制
+
+每次 `save_proxies` / `save_providers` / `save_dns` 时，config.yaml 从模板重建：
+
+```
+① 读取模板 config.template.yaml (骨架)
+② 读取当前 config.yaml (用户数据)
+③ 段级复制: proxy-providers, proxies 从当前配置 → 模板
+④ DNS 校验: 如果 nameserver key 结构与模板一致 → 保留用户 DNS 地址
+⑤ 注入: nm-nodes provider 条目 + SRC-IP 绑定规则
+⑥ 写回 config.yaml
+```
+
+| 来源 | 段 |
+|------|----|
+| **模板** | general / sniffer / tun / dns 结构 / proxy-groups / rules / rule-providers |
+| **当前配置** | proxy-providers (机场) / proxies (手动节点) / DNS 地址列表 (结构须匹配模板) |
+
+> 模板路径由 UCI `nodemanager.main.template` 配置，默认 `/usr/share/nodemanager/config.template.yaml`。
+> 如果模板文件不存在，fallback 到原有行为（直接修改 config.yaml）。
 
 ## Bind IP 规则管理
 
