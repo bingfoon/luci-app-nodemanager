@@ -131,6 +131,12 @@ local NM_PROVIDER_NAME = "nm-nodes"
 local NM_GROUP_NAME = "\240\159\143\160住宅节点"
 local NM_PROVIDER_FILE = "nm_proxies.yaml"
 
+-- Persistent storage path (source of truth, survives reboot)
+local function nm_storage_path()
+	local dir = conf_path():match("^(.+)/[^/]+$") or "/etc/nikki/profiles"
+	return dir .. "/" .. NM_PROVIDER_FILE
+end
+
 -- Detect Mihomo home directory from running process -d flag
 local function mihomo_home()
 	local ps = io.popen("ps w 2>/dev/null | grep -E 'mihomo|nikki' | grep -v grep")
@@ -145,9 +151,9 @@ local function mihomo_home()
 	return "/etc/nikki/run"
 end
 
-local function nm_provider_path()
-	local home = mihomo_home()
-	return home .. "/" .. NM_PROVIDER_FILE
+-- Runtime path for Mihomo (must be under -d directory)
+local function nm_runtime_path()
+	return mihomo_home() .. "/" .. NM_PROVIDER_FILE
 end
 
 local SAFE_PREFIXES = {"/etc/nikki/", "/tmp/", "/usr/share/nodemanager/"}
@@ -524,9 +530,6 @@ end
 
 -- Write managed proxies to separate provider file (no YAML anchors)
 local function write_provider_file(list, fingerprint)
-	local path = nm_provider_path()
-	local dir = path:match("^(.+)/[^/]+$") or "/"
-	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", dir))
 	local content = {}
 	if #list == 0 then
 		table.insert(content, "proxies: []")
@@ -537,25 +540,26 @@ local function write_provider_file(list, fingerprint)
 			table.insert(content, schema.output(p, fingerprint))
 		end
 	end
-	return fs.writefile(path, table.concat(content, "\n") .. "\n")
+	local data = table.concat(content, "\n") .. "\n"
+	-- Dual write: persistent + runtime
+	local storage = nm_storage_path()
+	local runtime = nm_runtime_path()
+	local sdir = storage:match("^(.+)/[^/]+$") or "/"
+	local rdir = runtime:match("^(.+)/[^/]+$") or "/"
+	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", sdir))
+	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", rdir))
+	fs.writefile(storage, data)
+	if storage ~= runtime then fs.writefile(runtime, data) end
+	return true
 end
 
--- Read proxies from provider file
+-- Read proxies from provider file (persistent storage is source of truth)
 local function read_provider_proxies()
-	local path = nm_provider_path()
-	local content = fs.readfile(path)
-	-- Fallback: migrate from old location (profiles dir) if new location is empty
-	if (not content or content == "" or content:match("^proxies:%s*%[%]")) then
-		local old_dir = conf_path():match("^(.+)/[^/]+$") or "/etc/nikki/profiles"
-		local old_path = old_dir .. "/" .. NM_PROVIDER_FILE
-		if old_path ~= path then
-			local old_content = fs.readfile(old_path)
-			if old_content and old_content ~= "" and not old_content:match("^proxies:%s*%[%]") then
-				-- Migrate: copy to new location
-				fs.writefile(path, old_content)
-				content = old_content
-			end
-		end
+	-- Read from persistent storage first
+	local content = fs.readfile(nm_storage_path())
+	-- Fallback: try runtime path
+	if not content or content == "" or content:match("^proxies:%s*%[%]") then
+		content = fs.readfile(nm_runtime_path())
 	end
 	if not content then return {} end
 	local lines = {}
@@ -607,7 +611,7 @@ local function parse_dialer_proxy(lines)
 	return nil
 end
 
--- Ensure proxy-providers: has nm-nodes entry with override.dialer-proxy
+-- Ensure proxy-providers: has exactly one nm-nodes entry
 local function save_provider_entry_to_lines(lines, dialer_proxy)
 	local entry_lines = {}
 	table.insert(entry_lines, string.format('  %s:', NM_PROVIDER_NAME))
@@ -631,7 +635,6 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	end
 
 	if not section_start then
-		-- Create section
 		table.insert(lines, "")
 		table.insert(lines, "proxy-providers:")
 		for _, el in ipairs(entry_lines) do table.insert(lines, el) end
@@ -639,31 +642,41 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	end
 	if not section_end then section_end = #lines end
 
-	-- Find existing nm-nodes entry
-	local ent_start, ent_end
-	for i = section_start + 1, section_end do
-		if lines[i]:match("^  " .. NM_PROVIDER_NAME .. ":") then
-			ent_start = i
-		elseif ent_start and not ent_end then
-			-- Next provider (2-space indent, not 4+) or section end
-			if lines[i]:match("^  %S") then
-				ent_end = i - 1
+	-- Strip ALL existing nm-nodes blocks from section
+	local result = {}
+	local skip = false
+	for i, line in ipairs(lines) do
+		if i > section_start and i <= section_end then
+			if line:match("^  " .. NM_PROVIDER_NAME .. ":") then
+				skip = true  -- entering nm-nodes block, skip it
+			elseif skip and line:match("^  %S") then
+				skip = false  -- hit next provider, stop skipping
 			end
+			if not skip then
+				table.insert(result, line)
+			end
+		else
+			table.insert(result, line)
 		end
 	end
-	if ent_start and not ent_end then ent_end = section_end end
 
-	local result = {}
-	if ent_start then
-		for i = 1, ent_start - 1 do table.insert(result, lines[i]) end
-		for _, el in ipairs(entry_lines) do table.insert(result, el) end
-		for i = ent_end + 1, #lines do table.insert(result, lines[i]) end
-	else
-		for i = 1, section_end do table.insert(result, lines[i]) end
-		for _, el in ipairs(entry_lines) do table.insert(result, el) end
-		for i = section_end + 1, #lines do table.insert(result, lines[i]) end
+	-- Find new section end after stripping
+	local insert_at = #result
+	for i, line in ipairs(result) do
+		if line:match("^proxy%-providers:") then
+			section_start = i
+		elseif i > section_start and line:match("^%S") then
+			insert_at = i - 1
+			break
+		end
 	end
-	return result
+
+	-- Insert one fresh nm-nodes entry at end of section
+	local final = {}
+	for i = 1, insert_at do table.insert(final, result[i]) end
+	for _, el in ipairs(entry_lines) do table.insert(final, el) end
+	for i = insert_at + 1, #result do table.insert(final, result[i]) end
+	return final
 end
 
 -- Save proxy group with use: [nm-nodes]
