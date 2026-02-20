@@ -238,7 +238,7 @@ return view.extend({
 					self.refreshPage();
 				}
 			}
-		}, '✕');
+		}, '🗑️');
 
 		var tdS = 'overflow:hidden;text-overflow:ellipsis;';
 

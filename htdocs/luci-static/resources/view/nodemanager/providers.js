@@ -80,7 +80,7 @@ return view.extend({
 							ev.target.closest('tr').remove();
 						}
 					}
-				}, '✕')
+				}, '🗑️')
 			])
 		]);
 	},

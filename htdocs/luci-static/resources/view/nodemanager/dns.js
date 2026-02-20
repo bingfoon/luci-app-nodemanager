@@ -126,7 +126,7 @@ return view.extend({
 				'click': function(ev) {
 					ev.target.closest('div[style]').remove();
 				}
-			}, '✕')
+			}, '🗑️')
 		]);
 		return row;
 	},
