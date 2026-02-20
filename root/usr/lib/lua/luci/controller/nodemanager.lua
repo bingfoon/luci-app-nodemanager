@@ -354,9 +354,12 @@ local function parse_providers(lines)
 				in_section = false
 			else
 				local pname = line:match("^  (%S+):")
-				if pname and pname ~= "<<" then
+				if pname and pname ~= "<<" and pname ~= NM_PROVIDER_NAME then
 					current = {name = pname, url = ""}
 					table.insert(providers, current)
+				elseif pname == NM_PROVIDER_NAME then
+					-- Skip nm-nodes (internal provider, not user-managed)
+					current = nil
 				elseif current then
 					local url = line:match('url:%s*"([^"]*)"')
 					if url then current.url = url end
@@ -618,10 +621,11 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	-- Find existing nm-nodes entry
 	local ent_start, ent_end
 	for i = section_start + 1, section_end do
-		if lines[i]:match("^%s+" .. NM_PROVIDER_NAME .. ":") then
+		if lines[i]:match("^  " .. NM_PROVIDER_NAME .. ":") then
 			ent_start = i
 		elseif ent_start and not ent_end then
-			if lines[i]:match("^%s%s%S") and not lines[i]:match("^%s%s%s%s") then
+			-- Next provider (2-space indent, not 4+) or section end
+			if lines[i]:match("^  %S") then
 				ent_end = i - 1
 			end
 		end
