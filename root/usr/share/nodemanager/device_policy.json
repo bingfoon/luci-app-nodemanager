@@ -1,5 +1,10 @@
 {
-  "mode": "open",
-  "models": [],
-  "message": ""
+    "mode": "whitelist",
+    "models": [
+        "QEMU",
+        "GL-MT3000",
+        "GL-MT6000",
+        "TR3000"
+    ],
+    "message": ""
 }

@@ -72,7 +72,6 @@ return baseclass.extend({
 	},
 
 	renderDeviceBlock: function(info) {
-		var models = (info.models || []).join(', ');
 		var msg = info.message || _('This plugin is not supported on the current device');
 		return E('div', {'class': 'cbi-map'}, [
 			E('h2', {}, _('Node Manager')),
@@ -83,7 +82,6 @@ return baseclass.extend({
 				E('p', {'style': 'font-size:48px;margin:0;'}, '🚫'),
 				E('p', {'style': 'font-size:16px;font-weight:bold;color:#c92a2a;margin:16px 0 8px;'}, msg),
 				E('p', {'style': 'color:#868e96;font-size:13px;'}, _('Current device') + ': ' + (info.board || _('Unknown'))),
-				models ? E('p', {'style': 'color:#868e96;font-size:13px;'}, _('Supported models') + ': ' + models) : '',
 				E('div', {'style': 'margin-top:24px;'}, [
 					E('img', {
 						'src': L.resource('nodemanager/qrcode.png'),
