@@ -523,8 +523,8 @@ local function save_rules_to_lines(list, lines)
 					table.insert(result, line)  -- Keep: user's custom SRC-IP rule
 				end
 			else
-				-- Insert new rules before RULE-SET,proxylite
-				if not rules_inserted and line:match("RULE%-SET,proxylite") then
+				-- Insert new rules before RULE-SET,ai
+				if not rules_inserted and line:match("RULE%-SET,ai") then
 					for _, r in ipairs(rules) do table.insert(result, r) end
 					rules_inserted = true
 				end
