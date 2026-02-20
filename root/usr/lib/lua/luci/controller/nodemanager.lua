@@ -728,7 +728,7 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	local skip = false
 	for i, line in ipairs(lines) do
 		if i > section_start and i <= section_end then
-			if line:match("^  " .. NM_PROVIDER_NAME .. ":") then
+			if line:match("^  " .. NM_PROVIDER_NAME:gsub("%-", "%%-") .. ":") then
 				skip = true  -- entering nm-nodes block, skip it
 			elseif skip and line:match("^  %S") then
 				skip = false  -- hit next provider, stop skipping
