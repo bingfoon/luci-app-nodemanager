@@ -20,6 +20,8 @@ end
 -- API Dispatch
 -- ============================================================
 local HANDLERS = {}
+local json_out       -- forward declaration
+local check_device   -- forward declaration
 
 function api()
 	local action = http.formvalue("action") or ""
@@ -45,7 +47,7 @@ end
 -- ============================================================
 local function trim(s) return (s or ""):match("^%s*(.-)%s*$") end
 
-local function json_out(t)
+json_out = function(t)
 	http.prepare_content("application/json")
 	http.write(require("luci.jsonc").stringify(t))
 end
@@ -61,7 +63,7 @@ end
 -- ============================================================
 local DEVICE_POLICY_PATH = "/usr/share/nodemanager/device_policy.json"
 
-local function check_device()
+check_device = function()
 	local raw = fs.readfile(DEVICE_POLICY_PATH)
 	if not raw then return true end
 	local policy = require("luci.jsonc").parse(raw)
