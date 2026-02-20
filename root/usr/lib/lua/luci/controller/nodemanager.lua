@@ -129,17 +129,25 @@ end
 
 local NM_PROVIDER_NAME = "nm-nodes"
 local NM_GROUP_NAME = "\240\159\143\160住宅节点"
+local NM_PROVIDER_FILE = "nm_proxies.yaml"
 
-local function nm_provider_path()
-	local dir = conf_path():match("^(.+)/[^/]+$") or "/etc/nikki/profiles"
-	return dir .. "/nm_proxies.yaml"
+-- Detect Mihomo home directory from running process -d flag
+local function mihomo_home()
+	local ps = io.popen("ps w 2>/dev/null | grep -E 'mihomo|nikki' | grep -v grep")
+	if ps then
+		local psout = ps:read("*a")
+		ps:close()
+		if psout then
+			local d = psout:match("%-d%s+(%S+)")
+			if d and fs.access(d) then return d end
+		end
+	end
+	return "/etc/nikki/run"
 end
 
--- Relative path for mihomo HomeDir constraint
-local function nm_provider_relpath()
-	local abs = nm_provider_path()
-	local rel = abs:match("/etc/nikki/(.+)")
-	return rel or abs
+local function nm_provider_path()
+	local home = mihomo_home()
+	return home .. "/" .. NM_PROVIDER_FILE
 end
 
 local SAFE_PREFIXES = {"/etc/nikki/", "/tmp/", "/usr/share/nodemanager/"}
@@ -536,6 +544,19 @@ end
 local function read_provider_proxies()
 	local path = nm_provider_path()
 	local content = fs.readfile(path)
+	-- Fallback: migrate from old location (profiles dir) if new location is empty
+	if (not content or content == "" or content:match("^proxies:%s*%[%]")) then
+		local old_dir = conf_path():match("^(.+)/[^/]+$") or "/etc/nikki/profiles"
+		local old_path = old_dir .. "/" .. NM_PROVIDER_FILE
+		if old_path ~= path then
+			local old_content = fs.readfile(old_path)
+			if old_content and old_content ~= "" and not old_content:match("^proxies:%s*%[%]") then
+				-- Migrate: copy to new location
+				fs.writefile(path, old_content)
+				content = old_content
+			end
+		end
+	end
 	if not content then return {} end
 	local lines = {}
 	for line in content:gmatch("[^\n]*") do table.insert(lines, line) end
@@ -591,7 +612,7 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	local entry_lines = {}
 	table.insert(entry_lines, string.format('  %s:', NM_PROVIDER_NAME))
 	table.insert(entry_lines, '    type: file')
-	table.insert(entry_lines, string.format('    path: %s', nm_provider_relpath()))
+	table.insert(entry_lines, string.format('    path: %s', NM_PROVIDER_FILE))
 	if dialer_proxy and dialer_proxy ~= "" then
 		table.insert(entry_lines, '    override:')
 		table.insert(entry_lines, string.format('      dialer-proxy: "%s"', dialer_proxy))
