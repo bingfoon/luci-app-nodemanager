@@ -39,6 +39,13 @@ return view.extend({
 		var self = this;
 		var running = self.status && self.status.running;
 
+		var batchDelBtn = E('button', {
+			'class': 'cbi-button cbi-button-remove',
+			'id': 'nm-batch-del',
+			'disabled': '',
+			'click': function(ev) { self.handleBatchDelete(ev.target); }
+		}, '🗑️ ' + _('Batch Delete'));
+
 		return E('div', {
 			'style': 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;'
 		}, [
@@ -46,6 +53,7 @@ return view.extend({
 				'class': 'cbi-button cbi-button-add',
 				'click': function() { self.addRow(); }
 			}, '➕ ' + _('Add')),
+			batchDelBtn,
 			E('button', {
 				'class': 'cbi-button',
 				'click': function() { self.showImportModal(); }
@@ -74,7 +82,14 @@ return view.extend({
 		var iStyle = 'width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;';
 
 		var thS = 'text-align:center;';
+		var selectAllCb = E('input', {
+			'type': 'checkbox',
+			'id': 'nm-select-all',
+			'title': _('Select All'),
+			'change': function() { self.togglePageSelect(this.checked); }
+		});
 		var thead = E('tr', {'class': 'tr table-titles'}, [
+			E('th', {'class': 'th', 'style': thS + 'width:24px'}, [selectAllCb]),
 			E('th', {'class': 'th', 'style': thS + 'width:24px'}, '☰'),
 			E('th', {'class': 'th', 'style': thS + 'width:12%'}, _('Name')),
 			E('th', {'class': 'th', 'style': thS + 'width:15ch'}, _('Server')),
@@ -167,6 +182,11 @@ return view.extend({
 		var next = document.getElementById('nm-page-next');
 		if (prev) prev.disabled = this.currentPage <= 1;
 		if (next) next.disabled = this.currentPage >= totalPages;
+
+		// Reset select-all on page change
+		var all = document.getElementById('nm-select-all');
+		if (all) all.checked = false;
+		this.updateBatchState();
 	},
 
 	createRow: function(p, running) {
@@ -235,6 +255,13 @@ return view.extend({
 		});
 
 		return E('tr', {'class': 'tr'}, [
+			E('td', {'class': 'td', 'style': 'text-align:center;'}, [
+				E('input', {
+					'type': 'checkbox',
+					'class': 'nm-row-cb',
+					'change': function() { self.updateBatchState(); }
+				})
+			]),
 			dragHandle,
 			E('td', {'class': 'td', 'style': tdS}, [
 				E('input', {'class': 'cbi-input-text', 'data-field': 'name', 'value': p.name, 'style': iS, 'required': ''})
@@ -508,6 +535,52 @@ return view.extend({
 				dragRow = null;
 			}
 		});
+	},
+
+	updateBatchState: function() {
+		var checked = document.querySelectorAll('#nm-proxy-body .nm-row-cb:checked');
+		var btn = document.getElementById('nm-batch-del');
+		if (btn) {
+			btn.disabled = checked.length === 0;
+			btn.textContent = checked.length > 0
+				? '🗑️ ' + _('Batch Delete') + ' (' + checked.length + ')'
+				: '🗑️ ' + _('Batch Delete');
+		}
+		// Update select-all checkbox
+		var all = document.getElementById('nm-select-all');
+		if (all) {
+			var visible = document.querySelectorAll('#nm-proxy-body tr[style=""] .nm-row-cb, #nm-proxy-body tr:not([style]) .nm-row-cb');
+			var visChecked = 0;
+			for (var i = 0; i < visible.length; i++) {
+				if (visible[i].checked) visChecked++;
+			}
+			all.checked = visible.length > 0 && visChecked === visible.length;
+			all.indeterminate = visChecked > 0 && visChecked < visible.length;
+		}
+	},
+
+	togglePageSelect: function(checked) {
+		var rows = document.querySelectorAll('#nm-proxy-body tr');
+		var start = (this.currentPage - 1) * this.pageSize;
+		var end = start + this.pageSize;
+		for (var i = 0; i < rows.length; i++) {
+			if (i >= start && i < end) {
+				var cb = rows[i].querySelector('.nm-row-cb');
+				if (cb) cb.checked = checked;
+			}
+		}
+		this.updateBatchState();
+	},
+
+	handleBatchDelete: function(btn) {
+		var checked = document.querySelectorAll('#nm-proxy-body .nm-row-cb:checked');
+		if (!checked.length) return;
+		if (!confirm(_('Delete %d selected nodes?').format(checked.length))) return;
+		for (var i = checked.length - 1; i >= 0; i--) {
+			checked[i].closest('tr').remove();
+		}
+		this.refreshPage();
+		this.updateBatchState();
 	},
 
 	handleSaveApply: null,

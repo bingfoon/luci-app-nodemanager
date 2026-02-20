@@ -190,3 +190,12 @@ msgstr ""
 
 msgid "Failed to load logs"
 msgstr ""
+
+msgid "Batch Delete"
+msgstr ""
+
+msgid "Delete %d selected nodes?"
+msgstr ""
+
+msgid "Select All"
+msgstr ""

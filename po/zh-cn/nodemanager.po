@@ -191,3 +191,12 @@ msgstr "暂无日志"
 
 msgid "Failed to load logs"
 msgstr "加载日志失败"
+
+msgid "Batch Delete"
+msgstr "批量删除"
+
+msgid "Delete %d selected nodes?"
+msgstr "确定删除 %d 个选中节点？"
+
+msgid "Select All"
+msgstr "全选"

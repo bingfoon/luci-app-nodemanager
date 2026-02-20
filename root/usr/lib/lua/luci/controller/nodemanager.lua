@@ -130,6 +130,7 @@ end
 local NM_PROVIDER_NAME = "nm-nodes"
 local NM_GROUP_NAME = "\240\159\143\160 住宅节点"
 local NM_PROVIDER_FILE = "nm_proxies.yaml"
+local NM_PREFIX = "[NM] "
 
 -- Persistent storage path (source of truth, survives reboot)
 local function nm_storage_path()
@@ -206,6 +207,58 @@ local function write_lines(lines)
 	end
 	return fs.writefile(path, table.concat(filtered, "\n"))
 end
+
+-- ============================================================
+-- Template Rebuild
+-- ============================================================
+
+-- Read template file lines
+local function read_template_lines()
+	local c = uci_cursor()
+	local tpl_path = c:get_first("nodemanager", "main", "template")
+		or "/usr/share/nodemanager/config.template.yaml"
+	local content = fs.readfile(tpl_path)
+	if not content then return nil end
+	local lines = {}
+	for line in (content .. "\n"):gmatch("(.-)[\n]") do
+		table.insert(lines, line)
+	end
+	if #lines > 0 and lines[#lines] == "" then table.remove(lines) end
+	return lines
+end
+
+-- Find a top-level YAML section (start line, end line)
+-- section_key example: "proxy-providers" matches "proxy-providers:"
+local function find_section(lines, section_key)
+	local pattern = "^" .. section_key:gsub("%-", "%%-") .. ":"
+	local s, e
+	for i, line in ipairs(lines) do
+		if not s then
+			if line:match(pattern) then s = i end
+		elseif line:match("^%S") then
+			e = i - 1
+			break
+		end
+	end
+	if s and not e then e = #lines end
+	return s, e
+end
+
+-- Copy a top-level section from src_lines into dst_lines, replacing dst's section
+local function copy_section(src_lines, dst_lines, section_key)
+	local ss, se = find_section(src_lines, section_key)
+	local ds, de = find_section(dst_lines, section_key)
+	if not ss or not ds then return dst_lines end
+	local result = {}
+	for i = 1, ds - 1 do table.insert(result, dst_lines[i]) end
+	for i = ss, se do table.insert(result, src_lines[i]) end
+	for i = de + 1, #dst_lines do table.insert(result, dst_lines[i]) end
+	return result
+end
+
+-- rebuild_config(): defined after helper functions (forward ref)
+local rebuild_config  -- forward declaration
+local dns_keys_match  -- forward declaration
 
 -- ============================================================
 -- Proxy Type Schemas
@@ -644,8 +697,9 @@ local function save_provider_entry_to_lines(lines, dialer_proxy)
 	table.insert(entry_lines, string.format('  %s:', NM_PROVIDER_NAME))
 	table.insert(entry_lines, '    type: file')
 	table.insert(entry_lines, string.format('    path: %s', NM_PROVIDER_FILE))
+	table.insert(entry_lines, '    override:')
+	table.insert(entry_lines, string.format('      additional-prefix: "%s"', NM_PREFIX))
 	if dialer_proxy and dialer_proxy ~= "" then
-		table.insert(entry_lines, '    override:')
 		table.insert(entry_lines, string.format('      dialer-proxy: "%s"', dialer_proxy))
 	end
 	table.insert(entry_lines, '    health-check:')
@@ -1026,10 +1080,67 @@ local function get_service_status()
 	return {running = running, version = version, api_port = api_port}
 end
 
--- ============================================================
--- Ensure config file exists
--- ============================================================
+-- Check if DNS nameserver keys in cur match template exactly
+dns_keys_match = function(cur_lines, tpl_lines)
+	local function extract_dns_keys(lines)
+		local keys = {}
+		local in_dns = false
+		for _, line in ipairs(lines) do
+			if line:match("^dns:") then in_dns = true
+			elseif in_dns and line:match("^%S") then break
+			elseif in_dns then
+				for _, k in ipairs(DNS_KEYS) do
+					if line:match("^%s+" .. k:gsub("%-", "%%-") .. ":") then
+						keys[k] = true
+					end
+				end
+			end
+		end
+		return keys
+	end
+	local cur_keys = extract_dns_keys(cur_lines)
+	local tpl_keys = extract_dns_keys(tpl_lines)
+	for k in pairs(tpl_keys) do
+		if not cur_keys[k] then return false end
+	end
+	for k in pairs(cur_keys) do
+		if not tpl_keys[k] then return false end
+	end
+	return true
+end
 
+-- ============================================================
+-- Template Rebuild (implementation, after all helpers)
+-- ============================================================
+rebuild_config = function(proxy_list)
+	local tpl_lines = read_template_lines()
+	if not tpl_lines then return read_lines() end  -- fallback: no template
+	local cur_lines = read_lines()
+	if #cur_lines == 0 then return tpl_lines end   -- first run: use template as-is
+
+	-- 1. Copy user-owned sections from current config into template
+	tpl_lines = copy_section(cur_lines, tpl_lines, "proxy-providers")
+	tpl_lines = copy_section(cur_lines, tpl_lines, "proxies")
+
+	-- 2. DNS: if keys match template structure, preserve user DNS values
+	if dns_keys_match(cur_lines, tpl_lines) then
+		local dns_map = parse_dns_servers(cur_lines)
+		tpl_lines = save_dns_to_lines(dns_map, tpl_lines)
+	end
+	-- else: DNS stays as template defaults
+
+	-- 3. Inject managed data
+	local dialer = parse_dialer_proxy(tpl_lines)
+	tpl_lines = save_provider_entry_to_lines(tpl_lines, dialer)
+	tpl_lines = save_proxy_group_to_lines(tpl_lines)
+
+	-- 4. SRC-IP bind rules
+	if proxy_list then
+		tpl_lines = save_rules_to_lines(proxy_list, tpl_lines)
+	end
+
+	return tpl_lines
+end
 
 -- ============================================================
 -- API Handlers
@@ -1120,17 +1231,12 @@ HANDLERS["save_proxies"] = function()
 	local fingerprint = get_fingerprint(lines)
 	-- 1. Write provider file (separate file, with fingerprint)
 	write_provider_file(list, fingerprint)
-	-- 2. Clean inline managed proxies from main config
+	-- 2. Clean inline managed proxies from main config (migration)
 	lines = save_proxies_to_lines({}, lines)
-	-- 3. Parse dialer-proxy from anchor definition
-	local dialer = parse_dialer_proxy(lines)
-	-- 4. Ensure proxy-providers entry
-	lines = save_provider_entry_to_lines(lines, dialer)
-	-- 5. Update proxy group
-	lines = save_proxy_group_to_lines(lines)
-	-- 6. SRC-IP rules
-	lines = save_rules_to_lines(list, lines)
-	if write_lines(lines) then
+	write_lines(lines)
+	-- 3. Rebuild from template
+	local rebuilt = rebuild_config(list)
+	if write_lines(rebuilt) then
 		json_out({ok = true})
 	else
 		json_out({ok = false, err = "Write failed"})
@@ -1151,9 +1257,14 @@ HANDLERS["save_providers"] = function()
 			return json_out({ok = false, err = string.format("Row %d: invalid URL", i)})
 		end
 	end
+	-- Write airports to current config first, then rebuild
 	local lines = read_lines()
 	lines = save_providers_to_lines(list, lines)
-	if write_lines(lines) then
+	write_lines(lines)
+	-- Rebuild from template (will copy the updated proxy-providers section)
+	local proxy_list = read_provider_proxies()
+	local rebuilt = rebuild_config(proxy_list)
+	if write_lines(rebuilt) then
 		json_out({ok = true})
 	else
 		json_out({ok = false, err = "Write failed"})
@@ -1218,9 +1329,14 @@ HANDLERS["save_dns"] = function()
 		end
 		dns_map[k] = dns_map[k] or {}
 	end
+	-- Write DNS to current config first, then rebuild
 	local lines = read_lines()
 	lines = save_dns_to_lines(dns_map, lines)
-	if write_lines(lines) then
+	write_lines(lines)
+	-- Rebuild from template (will check DNS key structure and preserve if valid)
+	local proxy_list = read_provider_proxies()
+	local rebuilt = rebuild_config(proxy_list)
+	if write_lines(rebuilt) then
 		json_out({ok = true})
 	else
 		json_out({ok = false, err = "Write failed"})
@@ -1266,8 +1382,9 @@ HANDLERS["test_proxy"] = function()
 	if not status.running then
 		return json_out({ok = false, err = "nikki is not running"})
 	end
-	-- URL encode the proxy name for the Mihomo API
-	local encoded = name:gsub("([^%w%-%.%_%~])", function(c)
+	-- Prepend NM_PREFIX for mihomo API (override.additional-prefix)
+	local api_name = NM_PREFIX .. name
+	local encoded = api_name:gsub("([^%w%-%.%_%~])", function(c)
 		return string.format("%%%02X", string.byte(c))
 	end)
 	local url = string.format(
