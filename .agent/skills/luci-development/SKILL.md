@@ -1,0 +1,211 @@
+---
+name: LuCI App Development
+description: OpenWrt LuCI 插件开发技能 — 涵盖 Lua 后端、LuCI JS 前端、YAML 操作、IPK 打包
+---
+
+# LuCI App 开发技能
+
+## 适用场景
+
+当修改涉及以下文件时，必须参考本技能：
+- `root/usr/lib/lua/luci/controller/nodemanager.lua` — Lua 后端
+- `htdocs/luci-static/resources/view/nodemanager/*.js` — LuCI JS 视图
+- `htdocs/luci-static/resources/nodemanager/common.js` — 公共模块
+- `root/usr/share/luci/menu.d/*.json` — 菜单配置
+- `root/usr/share/rpcd/acl.d/*.json` — ACL 权限
+- `po/**/*.po` — 翻译文件
+
+## 一、LuCI JS View 开发
+
+### 基本结构
+
+```javascript
+'use strict';
+'require view';
+'require ui';
+'require nodemanager.common as nm';
+
+return view.extend({
+    // 1. 数据加载 (异步)
+    load: function() {
+        return nm.call('load').then(function(resp) {
+            return (resp && resp.ok) ? resp.data : {};
+        });
+    },
+
+    // 2. 渲染 (load 的返回值作为参数)
+    render: function(data) {
+        var self = this;
+        return E('div', {'class': 'cbi-map'}, [
+            E('h2', {}, _('Page Title')),
+            nm.renderStatusBar(data.status),
+            // ... 页面内容
+        ]);
+    },
+
+    // 3. 禁用默认 footer (必须)
+    handleSaveApply: null,
+    handleReset: null,
+    addFooter: function() { return E('div'); }
+});
+```
+
+### 公共模块 (common.js)
+
+```javascript
+// 基于 baseclass 而非 view
+return baseclass.extend({
+    apiUrl: L.url('admin/services/nodemanager/api'),
+    call: function(action, data) { /* JSON 请求封装 */ },
+    renderStatusBar: function(status) { /* 服务状态栏 */ },
+    delayBadge: function(delay) { /* 延迟颜色徽章 */ },
+    testProxy: function(name) { /* 代理测速 */ }
+});
+```
+
+### DOM 构建规则
+
+```javascript
+// ✅ 正确：使用 E() 函数
+E('button', {
+    'class': 'cbi-button cbi-button-save',
+    'click': function(ev) { /* handler */ }
+}, '💾 ' + _('Save'))
+
+// ❌ 错误：使用 innerHTML
+div.innerHTML = '<button>Save</button>';
+```
+
+### 新增页面清单
+
+1. 创建 `htdocs/luci-static/resources/view/nodemanager/<name>.js`
+2. 在 `root/usr/share/luci/menu.d/luci-app-nodemanager.json` 添加菜单项
+3. 如果需要新 API，在 `nodemanager.lua` 添加 HANDLER
+
+---
+
+## 二、Lua Controller 后端
+
+### API 分发模式
+
+```lua
+-- 路由注册 (index 函数)
+function index()
+    entry({"admin", "services", "nodemanager"}, firstchild(), _("Node Manager"), 70)
+    entry({"admin", "services", "nodemanager", "api"}, call("api"), nil).leaf = true
+end
+
+-- Handler 注册
+HANDLERS["my_action"] = function()
+    local input = json_in()
+    -- 业务逻辑
+    json_out({ok = true, data = {result = "value"}})
+end
+```
+
+### 可用依赖 (OpenWrt 标准库)
+
+```lua
+local http = require "luci.http"       -- HTTP 请求/响应
+local sys  = require "luci.sys"        -- 系统调用 (sys.call, sys.exec)
+local fs   = require "nixio.fs"        -- 文件操作 (readfile, writefile, stat)
+local uci  = require "luci.model.uci"  -- UCI 配置
+local jsonc = require "luci.jsonc"     -- JSON 编解码
+local nixio = require "nixio"          -- 底层 I/O (gettimeofday)
+```
+
+### 不可用
+
+- 无 `date +%N` (BusyBox 不支持纳秒)
+- 无 `luayaml` / `lyaml` 等 YAML 库
+- 无 `luasocket` (部分固件可能缺失)
+- 无 `curl` (用 `wget -q -O`)
+
+---
+
+## 三、YAML 行级操作
+
+### 读取 Section
+
+```lua
+local in_section = false
+for _, line in ipairs(lines) do
+    if line:match("^dns:") then
+        in_section = true
+    elseif in_section and line:match("^%S") then
+        break  -- 离开当前 section
+    elseif in_section then
+        -- 处理 section 内的行
+        local val = line:match("^%s+-%s+(.+)")
+        if val then
+            table.insert(result, trim(val))
+        end
+    end
+end
+```
+
+### 值提取（带引号兼容）
+
+```lua
+-- 先尝试带引号，再尝试不带引号
+local name = line:match('name:%s*"([^"]*)"')
+          or line:match("name:%s*([^,}]+)")
+```
+
+### 写回 Section
+
+```lua
+local result = {}
+-- 1. 复制 section 之前的行
+for i = 1, section_start do table.insert(result, lines[i]) end
+-- 2. 插入新内容
+for _, new_line in ipairs(new_lines) do table.insert(result, new_line) end
+-- 3. 复制 section 之后的行
+for i = section_end + 1, #lines do table.insert(result, lines[i]) end
+return result
+```
+
+---
+
+## 四、IPK 打包
+
+### 本地打包 (build.sh)
+
+```bash
+bash build.sh
+# 输出: dist/luci-app-nodemanager_<version>_all.ipk
+```
+
+IPK 结构（外层 tar.gz，GNU_FORMAT）：
+```
+./debian-binary          → "2.0\n"
+./control.tar.gz         → control, postinst, prerm
+./data.tar.gz            → 实际文件树
+```
+
+### postinst 必须操作
+
+```bash
+/etc/init.d/rpcd restart      # 重新加载 ACL
+/etc/init.d/uhttpd restart    # 重新加载路由
+rm -rf /tmp/luci-modulecache /tmp/luci-indexcache*  # 清 LuCI 缓存
+```
+
+---
+
+## 五、新增 Proxy Schema
+
+当需要支持新代理类型（如 `vmess`）时：
+
+```lua
+SCHEMAS["vmess"] = {
+    required = {"uuid"},
+    output = function(p)
+        return string.format(
+            '  - {name: "%s", type: vmess, server: "%s", port: %s, uuid: "%s"}',
+            p.name, p.server, p.port, p.uuid or "")
+    end
+}
+```
+
+同时在前端 `proxies.js` 的 `createRow` 中添加对应字段。

@@ -1056,36 +1056,23 @@ HANDLERS["test_dns"] = function()
 	if not server or server == "" then
 		return json_out({ok = false, err = "No server specified"})
 	end
-	-- Extract host:port from various formats: 223.5.5.5, tls://223.5.5.5, https://dns.alidns.com/dns-query
-	local host = server:match("^%w+://([^/:]+)") or server:match("^([%d%.]+)$") or server:match("^([^/:]+)")
+	-- Extract host/IP from any format:
+	--   223.5.5.5 → 223.5.5.5
+	--   tls://223.5.5.5 → 223.5.5.5
+	--   https://dns.alidns.com/dns-query?ecs=... → dns.alidns.com
+	--   https://8.8.8.8/dns-query → 8.8.8.8
+	local host = server:match("^%w+://([^/:?]+)") or server:match("^([%d%.]+)") or server:match("^([^/:?]+)")
 	if not host then
 		return json_out({ok = false, err = "Cannot parse server address"})
 	end
-	-- Use nslookup with timeout to test DNS
-	local start = sys.call("date +%s%N > /tmp/nm_dns_t0 2>/dev/null || date +%s > /tmp/nm_dns_t0")
-	local cmd = string.format(
-		"nslookup -timeout=3 google.com %s >/dev/null 2>&1", host)
+	-- Random subdomain to prevent DNS cache hits
+	local rand = string.format("nm%d.google.com", os.time() % 100000)
+	local nixio = require "nixio"
+	local s0, u0 = nixio.gettimeofday()
+	local cmd = string.format("nslookup %s %s >/dev/null 2>&1", rand, host)
 	local code = sys.call(cmd)
-	-- Measure time (fallback: just report success/fail)
-	local delay = nil
-	local t0_raw = fs.readfile("/tmp/nm_dns_t0")
-	if t0_raw then
-		local t0 = tonumber(trim(t0_raw))
-		sys.call("date +%s%N > /tmp/nm_dns_t1 2>/dev/null || date +%s > /tmp/nm_dns_t1")
-		local t1_raw = fs.readfile("/tmp/nm_dns_t1")
-		if t1_raw then
-			local t1 = tonumber(trim(t1_raw))
-			if t0 and t1 then
-				if t0 > 1e15 then -- nanoseconds
-					delay = math.floor((t1 - t0) / 1e6) -- ms
-				else -- seconds
-					delay = (t1 - t0) * 1000 -- ms
-				end
-			end
-		end
-	end
-	os.remove("/tmp/nm_dns_t0")
-	os.remove("/tmp/nm_dns_t1")
+	local s1, u1 = nixio.gettimeofday()
+	local delay = (s1 - s0) * 1000 + math.floor((u1 - u0) / 1000)
 	if code == 0 then
 		json_out({ok = true, data = {delay = delay, host = host}})
 	else
