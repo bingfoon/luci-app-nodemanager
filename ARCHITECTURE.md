@@ -96,16 +96,33 @@ luci-app-nodemanager/
 
 ## Proxy Provider 隔离架构
 
-节点存储在独立的 `nm_proxies.yaml` 文件中，通过 `proxy-providers` 引用主配置：
+节点存储在独立的 `nm_proxies.yaml` 文件中，通过 `proxy-providers` 引用主配置。
+
+### 双写策略
+
+| 路径 | 用途 |
+|------|------|
+| `profiles/nm_proxies.yaml` | 持久存储（源头），读取优先从这里 |
+| `run/nm_proxies.yaml` | 运行时副本，Mihomo 从这里加载 |
+
+Mihomo 的 `-d` 目录为 `/etc/nikki/run/`，provider 文件路径必须在此目录下（安全限制）。`mihomo_home()` 从进程 `-d` 参数自动检测。
+
+保存时**同时写两个位置**，读取时**优先从 `profiles/`**，回退到 `run/`。
+
+### Provider 条目去重
+
+`save_provider_entry_to_lines` 采用**先删后插**策略：
+1. 遍历 `proxy-providers:` 段，删除**所有**已有的 `nm-nodes` 块
+2. 在段末尾插入唯一一份新条目
 
 ```yaml
 # 主配置自动生成
 proxy-providers:
   nm-nodes:
     type: file
-    path: profiles/nm_proxies.yaml
+    path: nm_proxies.yaml              # 相对于 Mihomo -d 目录
     override:
-      dialer-proxy: "前置节点名"     # 从 YAML anchor 自动继承
+      dialer-proxy: "前置节点名"        # 从 YAML anchor 自动继承
     health-check:
       enable: false
 

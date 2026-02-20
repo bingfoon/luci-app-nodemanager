@@ -125,6 +125,13 @@ local nixio = require "nixio"          -- 底层 I/O (gettimeofday)
 
 `conf_path()` 结果在同一请求内被缓存。目录扫描步骤已排除 `nm_proxies.yaml`，避免被 `write_provider_file` 先写入的文件干扰。
 
+### Provider 文件双写
+
+`nm_proxies.yaml` 采用双写策略：
+- **持久存储**：`profiles/`（`nm_storage_path()`，读取优先）
+- **运行时副本**：`run/`（`nm_runtime_path()`，Mihomo `-d` 目录下，满足安全限制）
+- `mihomo_home()` 从进程 `-d` 参数自动检测 home 目录
+
 ---
 
 ## 三、YAML 行级操作
