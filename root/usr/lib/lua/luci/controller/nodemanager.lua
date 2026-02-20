@@ -128,7 +128,7 @@ local function conf_path()
 end
 
 local NM_PROVIDER_NAME = "nm-nodes"
-local NM_GROUP_NAME = "\240\159\143\160住宅节点"
+local NM_GROUP_NAME = "\240\159\143\160 住宅节点"
 local NM_PROVIDER_FILE = "nm_proxies.yaml"
 
 -- Persistent storage path (source of truth, survives reboot)
