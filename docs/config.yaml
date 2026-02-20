@@ -22,8 +22,8 @@ bind-address: "*"
 ipv6: false
 unified-delay: true
 tcp-concurrent: true
-log-level: silent
-global-client-fingerprint: chrome
+find-process-mode: off
+log-level: warning
 keep-alive-idle: 600
 keep-alive-interval: 15
 profile:
@@ -51,7 +51,6 @@ sniffer:
   skip-domain:
     - "Mijia Cloud"
     - "+.push.apple.com"
- 
 tun:
   enable: true
   stack: mixed
@@ -80,7 +79,7 @@ dns:
     - https://dns.alidns.com/dns-query?ecs=223.5.5.0/24
   nameserver:
     - https://8.8.8.8/dns-query
- 
+    - https://1.1.1.1/dns-query
 proxy-groups:
   - {name: 🚀 默认代理, type: select, proxies: [🔯 香港故转, 🔯 日本故转, 🔯 狮城故转, 🔯 美国故转, ♻️ 香港自动, ♻️ 日本自动, ♻️ 狮城自动, ♻️ 美国自动, ♻️ 自动选择, 🇭🇰 香港节点, 🇯🇵 日本节点, 🇸🇬 狮城节点, 🇺🇲 美国节点, 🌐 全部节点, 直连]}
   - {name: 📹 YouTube, type: select, proxies: [🔯 香港故转, 🔯 日本故转, 🔯 狮城故转, 🔯 美国故转, ♻️ 香港自动, ♻️ 日本自动, ♻️ 狮城自动, ♻️ 美国自动, ♻️ 自动选择, 🇭🇰 香港节点, 🇯🇵 日本节点, 🇸🇬 狮城节点, 🇺🇲 美国节点, 🌐 全部节点, 直连]}
@@ -100,20 +99,21 @@ proxy-groups:
   - {name: 🇯🇵 日本节点, type: select, include-all: true, filter: "(?i)^(?!.*(?:S5|VLESS)).*日|jp|japan"}
   - {name: 🇸🇬 狮城节点, type: select, include-all: true, filter: "(?i)^(?!.*(?:S5|VLESS)).*新加坡|坡|狮城|SG|Singapore"}
   - {name: 🇺🇲 美国节点, type: select, include-all: true, filter: "(?i)^(?!.*(?:S5|VLESS)).*(美|us|unitedstates|united states)"}
-  - {name: 🔯 香港故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: 🔯 日本故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: 🔯 狮城故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(台|日本|韩|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: 🔯 美国故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|韩|新|狮|日本|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 香港自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: ♻️ 日本自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 狮城自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(港|台|韩|日本|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 美国自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|日本|韩|新|狮|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: ♻️ 自动选择, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "^((?!(直连|标准|高级|特殊|Traffic|Expire|\\d+\\s+GB)).)*$"}
+  - {name: 🔯 香港故转, type: fallback, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
+  - {name: 🔯 日本故转, type: fallback, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
+  - {name: 🔯 狮城故转, type: fallback, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(台|日本|韩|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
+  - {name: 🔯 美国故转, type: fallback, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|韩|新|狮|日本|标准|高级|特殊|S5|VLESS)).)*$" }
+  - {name: ♻️ 香港自动, type: url-test, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
+  - {name: ♻️ 日本自动, type: url-test, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
+  - {name: ♻️ 狮城自动, type: url-test, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(港|台|韩|日本|美|标准|高级|特殊|S5|VLESS)).)*$" }
+  - {name: ♻️ 美国自动, type: url-test, include-all: true, tolerance: 50, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|日本|韩|新|狮|标准|高级|特殊|S5|VLESS)).)*$"}
+  - {name: ♻️ 自动选择, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: "^((?!(标准|高级|特殊|Traffic|Expire|\\d+\\s+GB)).)*$"}
   - {name: 🌐 全部节点, type: select, include-all: true, filter: "^((?!(Traffic|Expire|\\d+\\s+GB)).)*$"}
 
 rules:
   - RULE-SET,private_ip,直连,no-resolve
   - RULE-SET,private_domain,直连
+  - RULE-SET,ntp_domain,直连
   - RULE-SET,apple_update_domain,🍎 Apple
   - RULE-SET,proxylite,🚀 默认代理
   - RULE-SET,ai,🤖 ChatGPT
@@ -135,7 +135,7 @@ rules:
   - RULE-SET,telegram_ip,📲 Telegram,no-resolve
   - RULE-SET,geolocation-!cn,🚀 默认代理
   - RULE-SET,cn_domain,直连
-  - RULE-SET,cn_ip,直连
+  - RULE-SET,cn_ip,直连,no-resolve
   - MATCH,🐟 漏网之鱼
 
 rule-anchor:
@@ -147,7 +147,7 @@ rule-providers:
   private_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/private.mrs"}
   ntp_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ntp.mrs"}
   proxylite: { <<: *class, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/proxy.list"}
-  ai: {  <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo/geosite/category-ai-!cn.mrs" }
+  ai: {  <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
   youtube_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs"}
   google_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs"}
   github_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs"}
@@ -164,9 +164,9 @@ rule-providers:
   geolocation-!cn: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.mrs"}
   cn_domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs"}
 
-  private_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo/geoip/private.mrs"}
+  private_ip: {<<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs"}
   cn_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs"}
   google_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/google.mrs"}
   telegram_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
   netflix_ip: { <<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
-  apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
+  apple_ip: {<<: *ip, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo-lite/geoip/apple.mrs"}
