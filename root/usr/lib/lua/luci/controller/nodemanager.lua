@@ -401,8 +401,10 @@ local function parse_bindmap(lines)
 			end
 			if ip and name then
 				name = trim(name)
+				-- Strip CIDR suffix for UI display (save path re-adds /32)
+				ip = trim(ip):match("^([%d%.]+)") or trim(ip)
 				if not map[name] then map[name] = {} end
-				table.insert(map[name], trim(ip))
+				table.insert(map[name], ip)
 			end
 		end
 	end
