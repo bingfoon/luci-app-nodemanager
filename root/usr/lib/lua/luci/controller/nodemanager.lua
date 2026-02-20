@@ -373,17 +373,16 @@ end
 -- Normalize bind IP: .0 → /24, /32 → strip, CIDR → keep
 local function normalize_bindip(ip)
 	ip = trim(ip)
-	local addr, mask = ip:match("^([%d%.]+)/(%d+)$")
-	if addr and mask then
-		local m = tonumber(mask)
-		if m == 32 then return addr end  -- /32 = single IP, strip
-		return addr .. "/" .. mask
-	else
-		-- No CIDR: check if last octet is 0
-		if ip:match("%.0$") then
-			return ip .. "/24"  -- .0 = user means subnet
-		end
-		return ip
+	-- Already has CIDR suffix: keep as-is
+	if ip:match("^[%d%.]+/%d+$") then return ip end
+	-- Infer CIDR from trailing zero octets
+	-- x.0.0.0 → /8, x.x.0.0 → /16, x.x.x.0 → /24, else → /32
+	local a, b, c, d = ip:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+	if not a then return ip .. "/32" end  -- fallback
+	if tonumber(b) == 0 and tonumber(c) == 0 and tonumber(d) == 0 then return ip .. "/8"
+	elseif tonumber(c) == 0 and tonumber(d) == 0 then return ip .. "/16"
+	elseif tonumber(d) == 0 then return ip .. "/24"
+	else return ip .. "/32"
 	end
 end
 
