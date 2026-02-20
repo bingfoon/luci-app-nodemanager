@@ -111,21 +111,23 @@ Mihomo 的 `-d` 目录为 `/etc/nikki/run/`，provider 文件路径必须在此�
 
 保存时**同时写两个位置**，读取时**优先从 `profiles/`**，回退到 `run/`。
 
-### Provider 条目去重
+### Provider 条目注入（模板为准）
 
+`rebuild_config` 在 `copy_section` 之前，先用 `extract_nm_nodes_block` 从模板提取 nm-nodes 块。
 `save_provider_entry_to_lines` 采用**先删后插**策略：
 1. 遍历 `proxy-providers:` 段，删除**所有**已有的 `nm-nodes` 块
-2. 在段末尾插入唯一一份新条目
+2. 在段末尾插入从模板提取的原始 nm-nodes 条目
 
 ```yaml
-# 主配置自动生成
+# 主配置自动生成（来自 config.template.yaml）
 proxy-providers:
   nm-nodes:
     type: file
     path: nm_proxies.yaml              # 相对于 Mihomo -d 目录
     override:
       additional-prefix: "[NM] "       # 隔离标记，exclude-filter 匹配
-      dialer-proxy: "前置节点名"        # 从 YAML anchor 自动继承
+      udp: true
+      dialer-proxy: "🚀 默认代理"      # 来自模板定义
     health-check:
       enable: false
 

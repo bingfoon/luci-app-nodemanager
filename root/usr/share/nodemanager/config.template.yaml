@@ -1,3 +1,5 @@
+nm-filter: &nm-filter "[NM]"
+
 airport: &airport
   type: http
   interval: 86400
@@ -15,14 +17,13 @@ proxy-providers:
   nm-nodes:
     type: file
     path: nm_proxies.yaml
-    health-check:
-      enable: false
     override:
       additional-prefix: "[NM] "
+      udp: true 
+      dialer-proxy: "🚀 默认代理"
+    health-check:
+      enable: false
 
-# 预留模板：通过 dialer-proxy 实现链式代理
-s5: &s5 {type: socks5, udp: true, dialer-proxy: "🚀 默认代理"}
-nm-filter: &nm-filter "[NM]"
 proxies:
   - {name: 直连, type: direct}
 
@@ -104,6 +105,7 @@ dns:
   nameserver:
     - "https://8.8.8.8/dns-query#🚀 默认代理"
     - "https://1.1.1.1/dns-query#🚀 默认代理"
+
 proxy-groups:
   - {name: 🚀 默认代理, type: select, proxies: [🔯 美国故转, 🔯 香港故转, 🔯 狮城故转, 🔯 日本故转, ♻️ 美国自动, ♻️ 香港自动, ♻️ 狮城自动, ♻️ 日本自动, ♻️ 自动选择, 🇺🇲 美国节点, 🇭🇰 香港节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, 🌐 全部节点, 直连]}
   - {name: 📹 YouTube, type: select, proxies: [🏠 住宅节点, 🔯 美国故转, 🔯 香港故转, 🔯 狮城故转, 🔯 日本故转, ♻️ 美国自动, ♻️ 香港自动, ♻️ 狮城自动, ♻️ 日本自动, ♻️ 自动选择, 🇺🇲 美国节点, 🇭🇰 香港节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, 🌐 全部节点, 直连]}
@@ -120,20 +122,20 @@ proxy-groups:
   - {name: 🍎 Apple, type: select, proxies: [直连, 🏠 住宅节点, 🚀 默认代理]}
   - {name: 🐟 漏网之鱼, type: select, proxies: [🏠 住宅节点, 🔯 美国故转, 🔯 香港故转, 🔯 狮城故转, 🔯 日本故转, ♻️ 美国自动, ♻️ 香港自动, ♻️ 狮城自动, ♻️ 日本自动, ♻️ 自动选择, 🇺🇲 美国节点, 🇭🇰 香港节点, 🇸🇬 狮城节点, 🇯🇵 日本节点, 🌐 全部节点, 直连]}
   - {name: 🏠 住宅节点, type: select, use: [nm-nodes]}
-  - {name: 🇺🇲 美国节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i)^(?!.*(?:S5|VLESS)).*(美|us|unitedstates|united states)"}
-  - {name: 🇭🇰 香港节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i)^(?!.*(?:S5|VLESS)).*(港|hk|hongkong|hong kong)"}
-  - {name: 🇸🇬 狮城节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i)^(?!.*(?:S5|VLESS)).*(新加坡|坡|狮城|SG|Singapore)"}
-  - {name: 🇯🇵 日本节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i)^(?!.*(?:S5|VLESS)).*(日|jp|japan)"}
-  - {name: 🔯 美国故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|韩|新|狮|日本|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: 🔯 香港故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: 🔯 狮城故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(台|日本|韩|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: 🔯 日本故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 美国自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇺🇸|美|US|(?i)States|America))^((?!(港|台|日本|韩|新|狮|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: ♻️ 香港自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇭🇰|港|HK|(?i)Hong))^((?!(台|日本|韩|新|狮|深|美|标准|高级|特殊|S5|VLESS)).)*$"}
-  - {name: ♻️ 狮城自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇸🇬|新加坡|坡|狮城|SG|Singapore))^((?!(港|台|韩|日本|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 日本自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?=.*(🇯🇵|日|JP|(?i)Japan))^((?!(港|台|韩|新|狮|美|标准|高级|特殊|S5|VLESS)).)*$" }
-  - {name: ♻️ 自动选择, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 20, interval: 300, filter: "^((?!(标准|高级|特殊|Traffic|Expire|\\d+\\s+GB)).)*$"}
-  - {name: 🌐 全部节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "^((?!(Traffic|Expire|\\d+\\s+GB)).)*$"}
+  - {name: 🇺🇲 美国节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i).*(美|us|united ?states)"}
+  - {name: 🇭🇰 香港节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i).*(港|hk|hong ?kong)"}
+  - {name: 🇸🇬 狮城节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i).*(新加坡|坡|狮城|sg|singapore)"}
+  - {name: 🇯🇵 日本节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "(?i).*(日|jp|japan)"}
+  - {name: 🔯 美国故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|新|狮|日本|标准|高级|特殊)).*(🇺🇸|美|US|States|America)"}
+  - {name: 🔯 香港故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:台|日本|韩|新|狮|深|美|标准|高级|特殊)).*(🇭🇰|港|HK|Hong)"}
+  - {name: 🔯 狮城故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|日本|深|美|标准|高级|特殊)).*(🇸🇬|新加坡|坡|狮城|SG|Singapore)"}
+  - {name: 🔯 日本故转, type: fallback, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|新|狮|美|标准|高级|特殊)).*(🇯🇵|日|JP|Japan)"}
+  - {name: ♻️ 美国自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|新|狮|日本|标准|高级|特殊)).*(🇺🇸|美|US|States|America)"}
+  - {name: ♻️ 香港自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:台|日本|韩|新|狮|深|美|标准|高级|特殊)).*(🇭🇰|港|HK|Hong)"}
+  - {name: ♻️ 狮城自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|日本|深|美|标准|高级|特殊)).*(🇸🇬|新加坡|坡|狮城|SG|Singapore)"}
+  - {name: ♻️ 日本自动, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 50, interval: 300, filter: "(?i)^(?!.*(?:港|台|韩|新|狮|美|标准|高级|特殊)).*(🇯🇵|日|JP|Japan)"}
+  - {name: ♻️ 自动选择, type: url-test, include-all: true, exclude-filter: *nm-filter, tolerance: 20, interval: 300, filter: "^(?!.*(?:标准|高级|特殊|Traffic|Expire|\\d+\\s+GB)).*$"}
+  - {name: 🌐 全部节点, type: select, include-all: true, exclude-filter: *nm-filter, filter: "^(?!.*(?:Traffic|Expire|\\d+\\s+GB)).*$"}
 
 rules:
   - RULE-SET,private_ip,直连,no-resolve

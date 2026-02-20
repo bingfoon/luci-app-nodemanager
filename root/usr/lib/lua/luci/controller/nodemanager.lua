@@ -676,37 +676,33 @@ local function read_provider_proxies()
 	return proxies
 end
 
--- Parse dialer-proxy from YAML anchor definition (e.g. s5: &s5 ... dialer-proxy: xxx)
-local function parse_dialer_proxy(lines)
-	local in_anchor = false
+-- Extract nm-nodes block lines from template's proxy-providers section
+local function extract_nm_nodes_block(lines)
+	local result = {}
+	local in_pp = false
+	local in_nm = false
+	local nm_pat = "^  " .. NM_PROVIDER_NAME:gsub("%-", "%%-") .. ":"
 	for _, line in ipairs(lines) do
-		if line:match("^s5:%s*&s5") or line:match("^s5:%s*$") then
-			-- Check same line for flow format: s5: &s5 {... dialer-proxy: "xxx" ...}
-			local dp = line:match('dialer%-proxy:%s*"([^"]*)"') or line:match("dialer%-proxy:%s*([^,}]+)")
-			if dp then return trim(dp) end
-			in_anchor = true
-		elseif in_anchor then
-			if line:match("^%S") and not line:match("^%s") then break end
-			local dp = line:match('dialer%-proxy:%s*"([^"]*)"') or line:match("dialer%-proxy:%s*(.+)")
-			if dp then return trim(dp) end
+		if line:match("^proxy%-providers:") then
+			in_pp = true
+		elseif in_pp and line:match("^%S") then
+			break
+		elseif in_pp then
+			if line:match(nm_pat) then
+				in_nm = true
+				table.insert(result, line)
+			elseif in_nm then
+				if line:match("^  %S") then break end
+				table.insert(result, line)
+			end
 		end
 	end
-	return nil
+	return result
 end
 
 -- Ensure proxy-providers: has exactly one nm-nodes entry
-local function save_provider_entry_to_lines(lines, dialer_proxy)
-	local entry_lines = {}
-	table.insert(entry_lines, string.format('  %s:', NM_PROVIDER_NAME))
-	table.insert(entry_lines, '    type: file')
-	table.insert(entry_lines, string.format('    path: %s', NM_PROVIDER_FILE))
-	table.insert(entry_lines, '    override:')
-	table.insert(entry_lines, string.format('      additional-prefix: "%s"', NM_PREFIX))
-	if dialer_proxy and dialer_proxy ~= "" then
-		table.insert(entry_lines, string.format('      dialer-proxy: "%s"', dialer_proxy))
-	end
-	table.insert(entry_lines, '    health-check:')
-	table.insert(entry_lines, '      enable: false')
+-- entry_lines: pre-extracted nm-nodes block from template
+local function save_provider_entry_to_lines(lines, entry_lines)
 
 	-- Find proxy-providers: section
 	local section_start, section_end
@@ -1121,6 +1117,9 @@ rebuild_config = function(proxy_list)
 	local cur_lines = read_lines()
 	if #cur_lines == 0 then return tpl_lines end   -- first run: use template as-is
 
+	-- 0. Extract nm-nodes block from template BEFORE copy_section overwrites it
+	local nm_entry = extract_nm_nodes_block(tpl_lines)
+
 	-- 1. Copy user-owned sections from current config into template
 	tpl_lines = copy_section(cur_lines, tpl_lines, "proxy-providers")
 	tpl_lines = copy_section(cur_lines, tpl_lines, "proxies")
@@ -1132,9 +1131,8 @@ rebuild_config = function(proxy_list)
 	end
 	-- else: DNS stays as template defaults
 
-	-- 3. Inject nm-nodes provider entry (template has proxy-groups already)
-	local dialer = parse_dialer_proxy(tpl_lines)
-	tpl_lines = save_provider_entry_to_lines(tpl_lines, dialer)
+	-- 3. Inject nm-nodes provider entry from template (source of truth)
+	tpl_lines = save_provider_entry_to_lines(tpl_lines, nm_entry)
 
 	-- 4. SRC-IP bind rules
 	if proxy_list then
