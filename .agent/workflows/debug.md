@@ -69,6 +69,8 @@ rm -rf /tmp/luci-modulecache /tmp/luci-indexcache*
 | 导入解析失败 | 格式不匹配 | 检查是否超过 64KB / 500 条 |
 | API 返回 403 | ACL 权限不足 | 检查 `rpcd/acl.d/` 配置 + 重启 rpcd |
 | Provider 节点不显示 | proxy-providers 配置缺失 | 检查主配置是否有 nm-nodes 条目 |
+| 保存后 config.yaml 没变 | conf_path 竞态 | 已修复：缓存路径 + 排除 nm_proxies.yaml |
+| nm-nodes 重复插入 | provider 边界检测不准 | 已修复：精确缩进匹配 |
 
 ## 7. 开发调试 (在 Mac 上)
 

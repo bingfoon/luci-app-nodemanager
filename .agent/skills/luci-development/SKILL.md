@@ -121,6 +121,10 @@ local nixio = require "nixio"          -- 底层 I/O (gettimeofday)
 - 无 `luasocket` (部分固件可能缺失)
 - 无 `curl` (用 `wget -q -O`)
 
+### conf_path() 缓存注意
+
+`conf_path()` 结果在同一请求内被缓存。目录扫描步骤已排除 `nm_proxies.yaml`，避免被 `write_provider_file` 先写入的文件干扰。
+
 ---
 
 ## 三、YAML 行级操作

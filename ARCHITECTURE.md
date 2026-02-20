@@ -88,9 +88,11 @@ luci-app-nodemanager/
 1. UCI: nodemanager.main.path          → /etc/nikki/profiles/config.yaml
 2. 进程参数: ps | grep mihomo -f ...   → 运行时配置
 3. nikki UCI: nikki.mixin.profile_name → /etc/nikki/profiles/<name>.yaml
-4. 目录扫描: /etc/nikki/profiles/*.yaml → 最近修改的文件
+4. 目录扫描: /etc/nikki/profiles/*.yaml → 最近修改的文件（排除 nm_proxies.yaml）
 5. 硬编码默认: /etc/nikki/profiles/config.yaml
 ```
+
+> **缓存机制**：同一请求内 `conf_path()` 结果被缓存，避免 `write_provider_file` 写入 `nm_proxies.yaml` 后导致目录扫描误判。
 
 ## Proxy Provider 隔离架构
 
@@ -115,6 +117,8 @@ proxy-groups:
 ```
 
 **隔离性**：`include-all: true` 的代理组 **不会** 包含托管节点。
+
+> `nm-nodes` 是系统内部 provider，机场管理页面自动过滤不显示。
 
 ## YAML 解析策略
 
