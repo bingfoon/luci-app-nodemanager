@@ -59,6 +59,15 @@ return baseclass.extend({
 		return E('span', { 'style': 'font-weight:bold;color:' + color }, delay + 'ms');
 	},
 
+	formatBytes: function(bytes) {
+		if (bytes === null || bytes === undefined || bytes < 0) return '–';
+		if (bytes === 0) return '0 B';
+		var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+		var i = Math.floor(Math.log(bytes) / Math.log(1024));
+		if (i >= units.length) i = units.length - 1;
+		return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+	},
+
 	testProxy: function(name) {
 		return request.get(
 			this.apiUrl + '?action=test_proxy&name=' + encodeURIComponent(name)

@@ -218,6 +218,34 @@ local function read_lines()
 	return lines
 end
 
+-- Atomic write: write to .tmp, backup original to .bak, rename into place.
+-- Falls back to fs.copy if os.rename fails (cross-device).
+-- On any write/flush error the .tmp is cleaned up and original is untouched.
+local function atomic_write(path, content)
+	local tmp = path .. ".tmp"
+	local fh, err = io.open(tmp, "w")
+	if not fh then return nil, "open tmp: " .. (err or "?") end
+	local wok, werr = fh:write(content)
+	if not wok then
+		fh:close()
+		os.remove(tmp)
+		return nil, "write tmp: " .. (werr or "?")
+	end
+	fh:flush()
+	fh:close()
+	-- backup original
+	if fs.access(path) then fs.copy(path, path .. ".bak") end
+	-- atomic rename
+	local ok, rerr = os.rename(tmp, path)
+	if not ok then
+		-- fallback: copy tmp over target (cross-device)
+		local cok = fs.copy(tmp, path)
+		os.remove(tmp)
+		if not cok then return nil, "rename+copy failed: " .. (rerr or "?") end
+	end
+	return true
+end
+
 local function write_lines(lines)
 	local path = conf_path()
 	-- Auto-migrate: strip deprecated global-client-fingerprint on every write
@@ -233,11 +261,7 @@ local function write_lines(lines)
 			table.insert(filtered, line)
 		end
 	end
-	-- Backup before write
-	if fs.access(path) then
-		fs.copy(path, path .. ".bak")
-	end
-	return fs.writefile(path, table.concat(filtered, "\n"))
+	return atomic_write(path, table.concat(filtered, "\n"))
 end
 
 -- ============================================================
@@ -317,6 +341,120 @@ local SCHEMAS = {
 			if fp and fp ~= "" then base = base .. string.format(', client-fingerprint: "%s"', fp) end
 			return base .. "}"
 		end
+	},
+	ss = {
+		required = {"password"},
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: ss, server: "%s", port: %s, cipher: "%s", password: "%s", udp: true',
+				p.name, p.server, p.port, p.cipher or "aes-256-gcm", p.password or "")
+			if fp and fp ~= "" then s = s .. string.format(', client-fingerprint: "%s"', fp) end
+			return s .. "}"
+		end
+	},
+	vmess = {
+		required = {"uuid"},
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: vmess, server: "%s", port: %s, uuid: "%s", alterId: %s, cipher: "%s"',
+				p.name, p.server, p.port, p.uuid or "", tonumber(p.alterId) or 0, p.cipher or "auto")
+			if p.tls then s = s .. ", tls: true" end
+			if p.servername and p.servername ~= "" then s = s .. string.format(', servername: "%s"', p.servername) end
+			if p.skip_cert_verify then s = s .. ", skip-cert-verify: true" end
+			local net = p.network or "tcp"
+			s = s .. string.format(', network: "%s"', net)
+			if net == "ws" then
+				local ws = {}
+				if p.ws_path and p.ws_path ~= "" then table.insert(ws, string.format('path: "%s"', p.ws_path)) end
+				if p.ws_host and p.ws_host ~= "" then table.insert(ws, string.format('headers: {Host: "%s"}', p.ws_host)) end
+				if #ws > 0 then s = s .. ", ws-opts: {" .. table.concat(ws, ", ") .. "}" end
+			elseif net == "grpc" then
+				if p.grpc_servicename and p.grpc_servicename ~= "" then
+					s = s .. string.format(', grpc-opts: {grpc-service-name: "%s"}', p.grpc_servicename)
+				end
+			end
+			if fp and fp ~= "" then s = s .. string.format(', client-fingerprint: "%s"', fp) end
+			s = s .. ", udp: true"
+			return s .. "}"
+		end
+	},
+	vless = {
+		required = {"uuid"},
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: vless, server: "%s", port: %s, uuid: "%s"',
+				p.name, p.server, p.port, p.uuid or "")
+			local net = p.network or "tcp"
+			s = s .. string.format(', network: "%s"', net)
+			if p.tls then s = s .. ", tls: true" end
+			if p.flow and p.flow ~= "" then s = s .. string.format(', flow: "%s"', p.flow) end
+			if p.servername and p.servername ~= "" then s = s .. string.format(', servername: "%s"', p.servername) end
+			if p.skip_cert_verify then s = s .. ", skip-cert-verify: true" end
+			if p.reality_public_key and p.reality_public_key ~= "" then
+				local ro = string.format('public-key: "%s"', p.reality_public_key)
+				if p.reality_short_id and p.reality_short_id ~= "" then
+					ro = ro .. string.format(', short-id: "%s"', p.reality_short_id)
+				end
+				s = s .. ", reality-opts: {" .. ro .. "}"
+			end
+			if net == "ws" then
+				local ws = {}
+				if p.ws_path and p.ws_path ~= "" then table.insert(ws, string.format('path: "%s"', p.ws_path)) end
+				if p.ws_host and p.ws_host ~= "" then table.insert(ws, string.format('headers: {Host: "%s"}', p.ws_host)) end
+				if #ws > 0 then s = s .. ", ws-opts: {" .. table.concat(ws, ", ") .. "}" end
+			elseif net == "grpc" then
+				if p.grpc_servicename and p.grpc_servicename ~= "" then
+					s = s .. string.format(', grpc-opts: {grpc-service-name: "%s"}', p.grpc_servicename)
+				end
+			end
+			if p.client_fingerprint and p.client_fingerprint ~= "" then
+				s = s .. string.format(', client-fingerprint: "%s"', p.client_fingerprint)
+			elseif fp and fp ~= "" then
+				s = s .. string.format(', client-fingerprint: "%s"', fp)
+			end
+			s = s .. ", udp: true"
+			return s .. "}"
+		end
+	},
+	trojan = {
+		required = {"password"},
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: trojan, server: "%s", port: %s, password: "%s"',
+				p.name, p.server, p.port, p.password or "")
+			if p.sni and p.sni ~= "" then s = s .. string.format(', sni: "%s"', p.sni) end
+			if p.skip_cert_verify then s = s .. ", skip-cert-verify: true" end
+			local net = p.network or "tcp"
+			if net ~= "tcp" then s = s .. string.format(', network: "%s"', net) end
+			if net == "ws" then
+				local ws = {}
+				if p.ws_path and p.ws_path ~= "" then table.insert(ws, string.format('path: "%s"', p.ws_path)) end
+				if p.ws_host and p.ws_host ~= "" then table.insert(ws, string.format('headers: {Host: "%s"}', p.ws_host)) end
+				if #ws > 0 then s = s .. ", ws-opts: {" .. table.concat(ws, ", ") .. "}" end
+			elseif net == "grpc" then
+				if p.grpc_servicename and p.grpc_servicename ~= "" then
+					s = s .. string.format(', grpc-opts: {grpc-service-name: "%s"}', p.grpc_servicename)
+				end
+			end
+			if fp and fp ~= "" then s = s .. string.format(', client-fingerprint: "%s"', fp) end
+			s = s .. ", udp: true"
+			return s .. "}"
+		end
+	},
+	hysteria2 = {
+		required = {"password"},
+		output = function(p, fp)
+			local s = string.format(
+				'  - {name: "%s", type: hysteria2, server: "%s", port: %s, password: "%s"',
+				p.name, p.server, p.port, p.password or "")
+			if p.sni and p.sni ~= "" then s = s .. string.format(', sni: "%s"', p.sni) end
+			if p.skip_cert_verify then s = s .. ", skip-cert-verify: true" end
+			if p.obfs and p.obfs ~= "" then s = s .. string.format(', obfs: "%s"', p.obfs) end
+			if p.obfs_password and p.obfs_password ~= "" then s = s .. string.format(', obfs-password: "%s"', p.obfs_password) end
+			if fp and fp ~= "" then s = s .. string.format(', client-fingerprint: "%s"', fp) end
+			s = s .. ", udp: true"
+			return s .. "}"
+		end
 	}
 }
 
@@ -325,10 +463,109 @@ for k, _ in pairs(SCHEMAS) do MANAGED_TYPES[k] = true end
 
 local function detect_managed_type(line)
 	local ptype = line:match("type:%s*(%w+)")
+	if ptype then ptype = ptype:lower() end
 	if ptype and MANAGED_TYPES[ptype] then return ptype end
 	-- Detect socks5 via YAML anchor reference <<: *s5
 	if line:match("%*s5") then return "socks5" end
 	return nil
+end
+
+-- Extract a YAML field value from an inline {key: val, ...} line
+local function yaml_field(line, key)
+	local pat = key:gsub("%-", "%%-")
+	return line:match(pat .. ':%s*"([^"]*)"') or line:match(pat .. ":%s*([^,}%s]+)")
+end
+
+-- Extract type-specific fields from a proxy YAML line
+local function extract_extra_fields(line, ptype)
+	local extra = {}
+	if ptype == "ss" then
+		extra.cipher = trim(yaml_field(line, "cipher") or "aes-256-gcm")
+	elseif ptype == "vmess" then
+		extra.uuid = trim(yaml_field(line, "uuid") or "")
+		extra.alterId = tonumber(yaml_field(line, "alterId")) or 0
+		extra.cipher = trim(yaml_field(line, "cipher") or "auto")
+		extra.network = trim(yaml_field(line, "network") or "tcp")
+		local tls_val = yaml_field(line, "tls")
+		if tls_val then extra.tls = (trim(tls_val) == "true") end
+		extra.servername = trim(yaml_field(line, "servername") or "")
+		local ws_match = line:match("ws%-opts:%s*{(.-)}")
+		if ws_match then
+			extra.ws_path = ws_match:match('path:%s*"([^"]*)"') or ws_match:match("path:%s*([^,}%s]+)")
+			local hdr = ws_match:match("headers:%s*{(.-)}")
+			if hdr then extra.ws_host = hdr:match('Host:%s*"([^"]*)"') or hdr:match("Host:%s*([^,}%s]+)") end
+		end
+		local grpc_match = line:match("grpc%-opts:%s*{(.-)}")
+		if grpc_match then
+			extra.grpc_servicename = grpc_match:match('grpc%-service%-name:%s*"([^"]*)"') or grpc_match:match("grpc%-service%-name:%s*([^,}%s]+)")
+		end
+	elseif ptype == "vless" then
+		extra.uuid = trim(yaml_field(line, "uuid") or "")
+		extra.network = trim(yaml_field(line, "network") or "tcp")
+		extra.flow = trim(yaml_field(line, "flow") or "")
+		local tls_val = yaml_field(line, "tls")
+		if tls_val then extra.tls = (trim(tls_val) == "true") end
+		extra.servername = trim(yaml_field(line, "servername") or "")
+		extra.client_fingerprint = trim(yaml_field(line, "client%-fingerprint") or "")
+		local reality = line:match("reality%-opts:%s*{(.-)}")
+		if reality then
+			extra.reality_public_key = reality:match('public%-key:%s*"([^"]*)"') or reality:match("public%-key:%s*([^,}%s]+)")
+			extra.reality_short_id = reality:match('short%-id:%s*"([^"]*)"') or reality:match("short%-id:%s*([^,}%s]+)")
+		end
+		local ws_match = line:match("ws%-opts:%s*{(.-)}")
+		if ws_match then
+			extra.ws_path = ws_match:match('path:%s*"([^"]*)"') or ws_match:match("path:%s*([^,}%s]+)")
+			local hdr = ws_match:match("headers:%s*{(.-)}")
+			if hdr then extra.ws_host = hdr:match('Host:%s*"([^"]*)"') or hdr:match("Host:%s*([^,}%s]+)") end
+		end
+		local grpc_match = line:match("grpc%-opts:%s*{(.-)}")
+		if grpc_match then
+			extra.grpc_servicename = grpc_match:match('grpc%-service%-name:%s*"([^"]*)"') or grpc_match:match("grpc%-service%-name:%s*([^,}%s]+)")
+		end
+	elseif ptype == "trojan" then
+		extra.sni = trim(yaml_field(line, "sni") or "")
+		extra.network = trim(yaml_field(line, "network") or "tcp")
+		local scv = yaml_field(line, "skip%-cert%-verify")
+		if scv then extra.skip_cert_verify = (trim(scv) == "true") end
+		local ws_match = line:match("ws%-opts:%s*{(.-)}")
+		if ws_match then
+			extra.ws_path = ws_match:match('path:%s*"([^"]*)"') or ws_match:match("path:%s*([^,}%s]+)")
+			local hdr = ws_match:match("headers:%s*{(.-)}")
+			if hdr then extra.ws_host = hdr:match('Host:%s*"([^"]*)"') or hdr:match("Host:%s*([^,}%s]+)") end
+		end
+	elseif ptype == "hysteria2" then
+		extra.sni = trim(yaml_field(line, "sni") or "")
+		extra.obfs = trim(yaml_field(line, "obfs") or "")
+		extra.obfs_password = trim(yaml_field(line, "obfs%-password") or "")
+		local scv = yaml_field(line, "skip%-cert%-verify")
+		if scv then extra.skip_cert_verify = (trim(scv) == "true") end
+	end
+	for k, v in pairs(extra) do
+		if v == "" then extra[k] = nil end
+	end
+	return extra
+end
+
+-- Parse a proxy YAML line into a proxy object with all fields
+local function parse_proxy_line(line)
+	local ptype = detect_managed_type(line)
+	if not ptype then return nil end
+	local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
+	local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
+	local port     = line:match("port:%s*(%d+)")
+	if not name or not server or not port then return nil end
+
+	local proxy = {
+		name     = trim(name),
+		type     = trim(ptype),
+		server   = trim(server),
+		port     = tonumber(port),
+		username = trim((line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")) or ""),
+		password = trim((line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")) or ""),
+	}
+	local extra = extract_extra_fields(line, ptype)
+	for k, v in pairs(extra) do proxy[k] = v end
+	return proxy
 end
 
 local function parse_proxies(lines)
@@ -340,25 +577,8 @@ local function parse_proxies(lines)
 		elseif in_block and line:match("^%S") then
 			break  -- left proxies block
 		elseif in_block and line:match("^%s*-%s*{") then
-			local ptype = detect_managed_type(line)
-			if ptype then
-				local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
-				local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
-				local port     = line:match("port:%s*(%d+)")
-				local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
-				local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
-
-				if name and server and port then
-					table.insert(proxies, {
-						name     = trim(name),
-						type     = trim(ptype),
-						server   = trim(server),
-						port     = tonumber(port),
-						username = trim(username or ""),
-						password = trim(password or ""),
-					})
-				end
-			end
+			local proxy = parse_proxy_line(line)
+			if proxy then table.insert(proxies, proxy) end
 		end
 	end
 	return proxies
@@ -725,8 +945,9 @@ local function write_provider_file(list, fingerprint)
 	local rdir = runtime:match("^(.+)/[^/]+$") or "/"
 	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", sdir))
 	sys.call(string.format("mkdir -p %q >/dev/null 2>&1", rdir))
-	fs.writefile(storage, data)
-	if storage ~= runtime then fs.writefile(runtime, data) end
+	local ok, werr = atomic_write(storage, data)
+	if not ok then return nil, werr end
+	if storage ~= runtime then atomic_write(runtime, data) end
 	return true
 end
 
@@ -741,7 +962,7 @@ local function read_provider_proxies()
 	if not content then return {} end
 	local lines = {}
 	for line in content:gmatch("[^\n]*") do table.insert(lines, line) end
-	-- Reuse parse_proxies logic on these lines (provider file has proxies: header)
+	-- Parse proxies using generic parser (supports all types)
 	local proxies = {}
 	local in_block = false
 	for _, line in ipairs(lines) do
@@ -750,24 +971,8 @@ local function read_provider_proxies()
 		elseif in_block and line:match("^%S") then
 			break
 		elseif in_block and line:match("^%s*-%s*{") then
-			local ptype = detect_managed_type(line)
-			if ptype then
-				local name     = line:match('name:%s*"([^"]*)"') or line:match("name:%s*([^,}]+)")
-				local server   = line:match('server:%s*"([^"]*)"') or line:match("server:%s*([^,}]+)")
-				local port     = line:match("port:%s*(%d+)")
-				local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
-				local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
-				if name and server and port then
-					table.insert(proxies, {
-						name     = trim(name),
-						type     = trim(ptype),
-						server   = trim(server),
-						port     = tonumber(port),
-						username = trim(username or ""),
-						password = trim(password or ""),
-					})
-				end
-			end
+			local proxy = parse_proxy_line(line)
+			if proxy then table.insert(proxies, proxy) end
 		end
 	end
 	return proxies
@@ -1001,61 +1206,247 @@ end
 -- ============================================================
 -- Import Pipeline (auto-detect format)
 -- ============================================================
+
+-- URL-decode a percent-encoded string
+local function url_decode(s)
+	if not s then return "" end
+	return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+end
+
+-- Parse URL query string into table
+local function parse_query(qs)
+	local params = {}
+	if not qs or qs == "" then return params end
+	for kv in qs:gmatch("[^&]+") do
+		local k, v = kv:match("^([^=]+)=?(.*)")
+		if k then params[url_decode(k)] = url_decode(v or "") end
+	end
+	return params
+end
+
+-- Pure Lua Base64 decoder (Lua 5.1, no external libs)
+-- Supports standard base64 and URL-safe variant (-_ instead of +/)
+local function base64_decode(input)
+	input = input:gsub("-", "+"):gsub("_", "/")
+	local pad = #input % 4
+	if pad == 2 then input = input .. "=="
+	elseif pad == 3 then input = input .. "="
+	end
+	local b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	local lut = {}
+	for i = 1, #b64 do lut[b64:sub(i, i)] = i - 1 end
+	lut["="] = 0
+	local out = {}
+	for i = 1, #input, 4 do
+		local a, b, c, d = lut[input:sub(i, i)] or 0,
+		                    lut[input:sub(i+1, i+1)] or 0,
+		                    lut[input:sub(i+2, i+2)] or 0,
+		                    lut[input:sub(i+3, i+3)] or 0
+		local n = a * 262144 + b * 4096 + c * 64 + d
+		local b1 = math.floor(n / 65536) % 256
+		local b2 = math.floor(n / 256) % 256
+		local b3 = n % 256
+		out[#out + 1] = string.char(b1)
+		if input:sub(i + 2, i + 2) ~= "=" then out[#out + 1] = string.char(b2) end
+		if input:sub(i + 3, i + 3) ~= "=" then out[#out + 1] = string.char(b3) end
+	end
+	return table.concat(out)
+end
+
+-- Try to detect and decode base64-encoded text
+local function try_base64_decode(text)
+	local clean = text:gsub("%s+", "")
+	if #clean < 20 then return nil end
+	if clean:match("[^A-Za-z0-9%+/%-%_=]") then return nil end
+	local ok, decoded = pcall(base64_decode, clean)
+	if not ok or not decoded or #decoded == 0 then return nil end
+	if decoded:match("[\0\1\2\3\4\5\6\7\8\14\15\16\17\18\19\20\21\22\23\24\25\26\27\28\29\30\31]") then
+		return nil
+	end
+	return decoded
+end
+
 local function parse_url_or_hostport(s)
 	s = trim(s)
-	-- URL format: socks5://user:pass@host:port  or  http://user:pass@host:port
 	local scheme, rest = s:match("^(socks5h?|https?)://(.+)$")
-	if not scheme then
-		scheme, rest = s:match("^(socks5h?)://(.+)$")
-	end
-	if not scheme then
-		scheme, rest = s:match("^(https?)://(.+)$")
-	end
+	if not scheme then scheme, rest = s:match("^(socks5h?)://(.+)$") end
+	if not scheme then scheme, rest = s:match("^(https?)://(.+)$") end
 
 	local user, pass, host, port, fragment
 	if scheme then
-		-- Normalize scheme
 		if scheme == "socks5h" then scheme = "socks5" end
 		if scheme == "https" then scheme = "http" end
-
-		-- Extract fragment as name
 		rest, fragment = rest:match("^(.-)#(.*)$")
 		if not rest then rest = s:match("://(.+)$"); fragment = nil end
-
-		-- user:pass@host:port
 		user, pass, host, port = rest:match("^([^:]+):([^@]+)@([^:]+):(%d+)")
-		if not host then
-			host, port = rest:match("^([^:]+):(%d+)")
-		end
+		if not host then host, port = rest:match("^([^:]+):(%d+)") end
 	else
-		-- Plain format: user:pass@host:port  or  host:port
 		user, pass, host, port = s:match("^([^:]+):([^@]+)@([^:]+):(%d+)")
-		if not host then
-			host, port = s:match("^([^:]+):(%d+)$")
-		end
-		scheme = "socks5"  -- default
+		if not host then host, port = s:match("^([^:]+):(%d+)$") end
+		scheme = "socks5"
 	end
-
 	if not host or not port then return nil end
-
 	return {
-		type     = scheme or "socks5",
-		server   = trim(host),
-		port     = tonumber(port),
-		username = trim(user or ""),
-		password = trim(pass or ""),
-		name     = trim(fragment or "")
+		type = scheme or "socks5", server = trim(host), port = tonumber(port),
+		username = trim(user or ""), password = trim(pass or ""), name = trim(fragment or "")
 	}
 end
+
+-- ============================================================
+-- Subscription Protocol URI Parsers
+-- ============================================================
+
+-- Parse ss:// URI (SIP002 + legacy)
+local function parse_ss_uri(s)
+	local body = s:match("^ss://(.+)$")
+	if not body then return nil end
+	local fragment
+	body, fragment = body:match("^(.-)#(.*)$")
+	if not body then body = s:match("^ss://(.+)$"); fragment = nil end
+	fragment = fragment and url_decode(trim(fragment)) or ""
+	-- SIP002: base64(method:password)@hostname:port
+	local userinfo_b64, host, port = body:match("^([A-Za-z0-9%+/%-%_=]+)@([^:/?]+):(%d+)")
+	if userinfo_b64 then
+		local ok, decoded = pcall(base64_decode, userinfo_b64)
+		if ok and decoded then
+			local method, password = decoded:match("^([^:]+):(.+)$")
+			if method then
+				return { type = "ss", name = fragment, server = trim(host), port = tonumber(port),
+					cipher = trim(method), password = trim(password) }
+			end
+		end
+	end
+	-- Legacy: base64(method:password@hostname:port)
+	local clean = body:gsub("@.*", ""):gsub("[?].*", "")
+	local ok, decoded = pcall(base64_decode, clean)
+	if ok and decoded then
+		local method, password, h, p = decoded:match("^([^:]+):(.+)@([^:]+):(%d+)$")
+		if method then
+			return { type = "ss", name = fragment, server = trim(h), port = tonumber(p),
+				cipher = trim(method), password = trim(password) }
+		end
+	end
+	return nil
+end
+
+-- Parse vmess:// URI (v2rayN: vmess://base64(JSON))
+local function parse_vmess_uri(s)
+	local body = s:match("^vmess://(.+)$")
+	if not body then return nil end
+	body = body:match("^(.-)#") or body
+	local ok, decoded = pcall(base64_decode, trim(body))
+	if not ok or not decoded then return nil end
+	local data = require("luci.jsonc").parse(decoded)
+	if not data or not data.add then return nil end
+	local net = data.net or "tcp"
+	local proxy = {
+		type = "vmess", name = data.ps or data.add, server = trim(data.add),
+		port = tonumber(data.port) or 443, uuid = data.id or "",
+		alterId = tonumber(data.aid) or 0, cipher = "auto", network = net,
+		tls = (data.tls == "tls" or data.tls == "true"),
+		servername = data.sni or data.host or "",
+	}
+	if data.sni and data.sni ~= "" then proxy.servername = data.sni end
+	if net == "ws" then proxy.ws_path = data.path or "/"; proxy.ws_host = data.host or ""
+	elseif net == "grpc" then proxy.grpc_servicename = data.path or "" end
+	return proxy
+end
+
+-- Parse vless:// URI
+local function parse_vless_uri(s)
+	local body = s:match("^vless://(.+)$")
+	if not body then return nil end
+	local fragment
+	body, fragment = body:match("^(.-)#(.*)$")
+	if not body then body = s:match("^vless://(.+)$"); fragment = nil end
+	fragment = fragment and url_decode(trim(fragment)) or ""
+	local uuid, host, port, qs = body:match("^([^@]+)@([^:/?]+):(%d+)[?]?(.*)$")
+	if not uuid then return nil end
+	local params = parse_query(qs)
+	local security = params.security or ""
+	local net = params.type or "tcp"
+	local proxy = {
+		type = "vless", name = fragment, server = trim(host), port = tonumber(port),
+		uuid = trim(uuid), network = net,
+		tls = (security == "tls" or security == "reality"),
+		flow = params.flow or "", servername = params.sni or "",
+		client_fingerprint = params.fp or "",
+	}
+	if security == "reality" then
+		proxy.reality_public_key = params.pbk or ""
+		proxy.reality_short_id = params.sid or ""
+	end
+	if net == "ws" then proxy.ws_path = params.path or "/"; proxy.ws_host = params.host or ""
+	elseif net == "grpc" then proxy.grpc_servicename = params.serviceName or params["service-name"] or "" end
+	return proxy
+end
+
+-- Parse trojan:// URI
+local function parse_trojan_uri(s)
+	local body = s:match("^trojan://(.+)$")
+	if not body then return nil end
+	local fragment
+	body, fragment = body:match("^(.-)#(.*)$")
+	if not body then body = s:match("^trojan://(.+)$"); fragment = nil end
+	fragment = fragment and url_decode(trim(fragment)) or ""
+	local password, host, port, qs = body:match("^([^@]+)@([^:/?]+):(%d+)[?]?(.*)$")
+	if not password then return nil end
+	local params = parse_query(qs)
+	local net = params.type or "tcp"
+	local proxy = {
+		type = "trojan", name = fragment, server = trim(host), port = tonumber(port),
+		password = url_decode(trim(password)), sni = params.sni or "", network = net,
+	}
+	if net == "ws" then proxy.ws_path = params.path or "/"; proxy.ws_host = params.host or ""
+	elseif net == "grpc" then proxy.grpc_servicename = params.serviceName or params["service-name"] or "" end
+	return proxy
+end
+
+-- Parse hysteria2:// or hy2:// URI
+local function parse_hysteria2_uri(s)
+	local body = s:match("^hysteria2://(.+)$") or s:match("^hy2://(.+)$")
+	if not body then return nil end
+	local fragment
+	body, fragment = body:match("^(.-)#(.*)$")
+	if not body then body = s:match("^hysteria2://(.+)$") or s:match("^hy2://(.+)$"); fragment = nil end
+	fragment = fragment and url_decode(trim(fragment)) or ""
+	local password, host, port, qs = body:match("^([^@]+)@([^:/?]+):(%d+)[?]?(.*)$")
+	if not password then return nil end
+	local params = parse_query(qs)
+	return {
+		type = "hysteria2", name = fragment, server = trim(host), port = tonumber(port),
+		password = url_decode(trim(password)), sni = params.sni or "",
+		obfs = params.obfs or "", obfs_password = params["obfs-password"] or "",
+	}
+end
+
+-- Dispatch proxy URI to the appropriate parser
+local function parse_proxy_uri(s)
+	s = trim(s)
+	local scheme = s:match("^(%w[%w%-]*)://")
+	if not scheme then return parse_url_or_hostport(s) end
+	scheme = scheme:lower()
+	if scheme == "ss" then return parse_ss_uri(s)
+	elseif scheme == "vmess" then return parse_vmess_uri(s)
+	elseif scheme == "vless" then return parse_vless_uri(s)
+	elseif scheme == "trojan" then return parse_trojan_uri(s)
+	elseif scheme == "hysteria2" or scheme == "hy2" then return parse_hysteria2_uri(s)
+	elseif scheme == "socks5" or scheme == "socks5h" or scheme == "http" or scheme == "https" then
+		return parse_url_or_hostport(s)
+	end
+	return nil
+end
+
+-- ============================================================
+-- Format Parsers
+-- ============================================================
 
 local function parse_json_import(text)
 	local data = require("luci.jsonc").parse(text)
 	if not data then return false, nil, "Invalid JSON" end
-	-- Handle both array and {proxies: [...]} format
 	local arr = data
 	if type(data) == "table" and data.proxies then arr = data.proxies end
 	if type(arr) ~= "table" then return false, nil, "Expected array" end
-
 	local result = {}
 	for _, item in ipairs(arr) do
 		if type(item) == "table" and item.server then
@@ -1082,16 +1473,12 @@ local function parse_yaml_import(text)
 			local ptype    = line:match("type:%s*(%w+)")
 			local username = line:match('username:%s*"([^"]*)"') or line:match("username:%s*([^,}]+)")
 			local password = line:match('password:%s*"([^"]*)"') or line:match("password:%s*([^,}]+)")
-
 			if name and server and port then
 				if ptype and ptype:match("socks") then ptype = "socks5" end
 				table.insert(result, {
-					name     = trim(name),
-					type     = trim(ptype or "socks5"),
-					server   = trim(server),
-					port     = tonumber(port),
-					username = trim(username or ""),
-					password = trim(password or ""),
+					name = trim(name), type = trim(ptype or "socks5"),
+					server = trim(server), port = tonumber(port),
+					username = trim(username or ""), password = trim(password or ""),
 				})
 			end
 		end
@@ -1106,17 +1493,19 @@ local function parse_lines_import(text)
 	for line in text:gmatch("[^\n]+") do
 		line = trim(line)
 		if line ~= "" and not line:match("^#") then
-			-- Extract trailing comment as name
-			local content, comment = line:match("^(.-)%s*#%s*(.+)$")
-			content = content or line
+			local content, comment
+			if line:match("^%w[%w%-]*://") then
+				content = line; comment = nil
+			else
+				content, comment = line:match("^(.-)%s*#%s*(.+)$")
+				content = content or line
+			end
 			content = trim(content)
-
-			local node = parse_url_or_hostport(content)
+			local node = parse_proxy_uri(content)
 			if node then
 				idx = idx + 1
-				if node.name == "" then
-					node.name = comment or (node.server .. ":" .. node.port)
-				end
+				if (not node.name or node.name == "") and comment then node.name = comment end
+				if not node.name or node.name == "" then node.name = node.server .. ":" .. node.port end
 				table.insert(result, node)
 			end
 		end
@@ -1125,26 +1514,23 @@ local function parse_lines_import(text)
 	return true, result
 end
 
-local function detect_and_parse(text)
+local function detect_and_parse(text, depth)
+	depth = depth or 0
 	text = trim(text)
-	if #text > 65536 then
-		return false, nil, "Input too large (max 64KB)"
-	end
-	if text == "" then
-		return false, nil, "Empty input"
+	if #text > 65536 then return false, nil, "Input too large (max 64KB)" end
+	if text == "" then return false, nil, "Empty input" end
+
+	-- 0. Base64 decode attempt (max recursion depth 2)
+	if depth < 2 then
+		local decoded = try_base64_decode(text)
+		if decoded then return detect_and_parse(decoded, depth + 1) end
 	end
 
 	-- 1. JSON?
-	if text:match("^%s*[{%[]") then
-		return parse_json_import(text)
-	end
-
+	if text:match("^%s*[{%[]") then return parse_json_import(text) end
 	-- 2. YAML proxies block?
-	if text:match("%-%s*{?name:") or text:match("%-%s*name:") then
-		return parse_yaml_import(text)
-	end
-
-	-- 3. Lines (TXT / URL)
+	if text:match("%-%s*{?name:") or text:match("%-%s*name:") then return parse_yaml_import(text) end
+	-- 3. Lines (TXT / URL / subscription URIs)
 	return parse_lines_import(text)
 end
 
@@ -1153,7 +1539,7 @@ end
 -- ============================================================
 local function validate_proxy(p)
 	if not p.name or trim(p.name) == "" then return "missing name" end
-	if not p.server or not p.server:match("^[%w%.%-]+$") then return "invalid server" end
+	if not p.server or not p.server:match("^[%w%.%-:%[%]]+$") then return "invalid server" end
 	local port = tonumber(p.port)
 	if not port or port < 1 or port > 65535 then return "invalid port" end
 	p.port = port
@@ -1412,11 +1798,15 @@ HANDLERS["test_dns"] = function()
 	if not host then
 		return json_out({ok = false, err = "Cannot parse server address"})
 	end
+	-- Whitelist validation: only allow alphanumeric, dot, hyphen, colon; max 253 chars
+	if #host > 253 or host:match("[^%w%.%-:]") then
+		return json_out({ok = false, err = "Invalid DNS server address"})
+	end
 	-- Random subdomain to prevent DNS cache hits
 	local rand = string.format("nm%d.google.com", os.time() % 100000)
 	local nixio = require "nixio"
 	local s0, u0 = nixio.gettimeofday()
-	local cmd = string.format("nslookup %s %s >/dev/null 2>&1", rand, host)
+	local cmd = string.format("nslookup '%s' '%s' >/dev/null 2>&1", rand:gsub("'",""), host:gsub("'",""))
 	local code = sys.call(cmd)
 	local s1, u1 = nixio.gettimeofday()
 	local delay = (s1 - s0) * 1000 + math.floor((u1 - u0) / 1000)
@@ -1513,6 +1903,29 @@ end
 HANDLERS["get_logs"] = function()
 	local log = sys.exec("logread 2>/dev/null | grep -i nodemanager | tail -n 200") or ""
 	json_out({ok = true, data = {log = log}})
+end
+
+HANDLERS["get_traffic"] = function()
+	local status = get_service_status()
+	if not status.running then
+		return json_out({ok = false, err = "Service is not running"})
+	end
+	local data = http_get_json("http://127.0.0.1:" .. status.api_port .. "/proxies")
+	if not data or not data.proxies then
+		return json_out({ok = false, err = "Failed to get traffic data"})
+	end
+	local traffic = {}
+	for name, info in pairs(data.proxies) do
+		-- NM-managed nodes are prefixed with [NM]
+		local base = name:match("^%[NM%] (.+)")
+		if base then
+			traffic[base] = {
+				upload = info.up or 0,
+				download = info.down or 0
+			}
+		end
+	end
+	json_out({ok = true, data = {traffic = traffic}})
 end
 
 HANDLERS["service"] = function()

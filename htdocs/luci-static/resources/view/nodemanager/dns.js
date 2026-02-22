@@ -10,6 +10,30 @@ var DNS_SECTIONS = [
 	{key: 'nameserver',               label: 'Nameserver',                placeholder: 'e.g. https://8.8.8.8/dns-query'}
 ];
 
+// Validate a DNS server address for test_dns (extract and check host portion)
+function validateDnsServer(server) {
+	if (typeof server !== 'string' || !server.trim()) return null;
+	server = server.trim();
+	if (server.length > 2048) return null;
+	// Extract host from URL or bare address
+	var m = server.match(/^\w+:\/\/([^/:?#]+)/) ||
+	        server.match(/^([\d.]+)/) ||
+	        server.match(/^([^/:?#]+)/);
+	if (!m || !m[1]) return null;
+	var host = m[1];
+	// Strict whitelist: alphanumeric, dot, hyphen only; max 253 chars
+	if (host.length > 253 || /[^a-zA-Z0-9.\-]/.test(host)) return null;
+	// No leading/trailing dot/hyphen, no consecutive dots
+	if (/^[.\-]|[.\-]$|\.\./.test(host)) return null;
+	// Label validation: each label 1-63 chars, no leading/trailing hyphen
+	var labels = host.split('.');
+	for (var i = 0; i < labels.length; i++) {
+		if (labels[i].length < 1 || labels[i].length > 63) return null;
+		if (/^-|-$/.test(labels[i])) return null;
+	}
+	return host;
+}
+
 return view.extend({
 	dns: {},
 	status: null,
@@ -103,9 +127,18 @@ return view.extend({
 					var badge = btn.closest('div').querySelector('span');
 					var server = input.value.trim();
 					if (!server) return;
+					// Frontend validation before sending to backend
+					var validHost = validateDnsServer(server);
+					if (!validHost) {
+						badge.textContent = '⚠️';
+						badge.style.color = '#e74c3c';
+						badge.setAttribute('title', _('Invalid DNS address'));
+						return;
+					}
 					btn.disabled = true;
 					badge.textContent = '⏳';
 					badge.style.color = '#868e96';
+					badge.removeAttribute('title');
 					nm.call('test_dns', {server: server})
 						.then(function(resp) {
 							if (resp && resp.ok && resp.data) {

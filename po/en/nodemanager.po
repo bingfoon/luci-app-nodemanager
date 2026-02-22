@@ -110,6 +110,9 @@ msgstr ""
 msgid "Paste proxies here (JSON / YAML / URL / TXT)..."
 msgstr ""
 
+msgid "Paste proxies here (JSON / YAML / URI / Base64 subscription)...\n\nSupported:\nss://... vmess://... vless://... trojan://... hysteria2://...\nsocks5://user:pass@1.2.3.4:1080#Name\n[{\"name\":\"HK\",\"type\":\"socks5\",\"server\":\"1.2.3.4\",\"port\":1080}]\n\nBase64 encoded content is auto-detected."
+msgstr ""
+
 msgid "Append to existing"
 msgstr ""
 
@@ -135,6 +138,9 @@ msgid "Error: "
 msgstr ""
 
 msgid "Paste text or select a file. Format is auto-detected."
+msgstr ""
+
+msgid "Paste text, Base64 subscription content, or select a file. Format is auto-detected."
 msgstr ""
 
 msgid "nikki is not running"
@@ -210,4 +216,10 @@ msgid "Supported models"
 msgstr ""
 
 msgid "Unknown"
+msgstr ""
+
+msgid "Traffic"
+msgstr ""
+
+msgid "Refresh traffic stats"
 msgstr ""

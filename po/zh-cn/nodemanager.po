@@ -111,6 +111,9 @@ msgstr "导入代理节点"
 msgid "Paste proxies here (JSON / YAML / URL / TXT)..."
 msgstr "在此粘贴代理信息 (JSON / YAML / URL / TXT)..."
 
+msgid "Paste proxies here (JSON / YAML / URI / Base64 subscription)...\n\nSupported:\nss://... vmess://... vless://... trojan://... hysteria2://...\nsocks5://user:pass@1.2.3.4:1080#Name\n[{\"name\":\"HK\",\"type\":\"socks5\",\"server\":\"1.2.3.4\",\"port\":1080}]\n\nBase64 encoded content is auto-detected."
+msgstr "在此粘贴代理信息 (JSON / YAML / URI / Base64 订阅)...\n\n支持格式：\nss://... vmess://... vless://... trojan://... hysteria2://...\nsocks5://user:pass@1.2.3.4:1080#Name\n[{\"name\":\"HK\",\"type\":\"socks5\",\"server\":\"1.2.3.4\",\"port\":1080}]\n\nBase64 编码内容自动识别。"
+
 msgid "Append to existing"
 msgstr "追加到现有列表"
 
@@ -137,6 +140,9 @@ msgstr "错误: "
 
 msgid "Paste text or select a file. Format is auto-detected."
 msgstr "粘贴文本或选择文件，格式自动识别。"
+
+msgid "Paste text, Base64 subscription content, or select a file. Format is auto-detected."
+msgstr "粘贴文本、Base64 订阅内容或选择文件，格式自动识别。"
 
 msgid "nikki is not running"
 msgstr "nikki 未运行"
@@ -212,3 +218,9 @@ msgstr "支持型号"
 
 msgid "Unknown"
 msgstr "未知"
+
+msgid "Traffic"
+msgstr "流量"
+
+msgid "Refresh traffic stats"
+msgstr "刷新流量统计"

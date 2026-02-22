@@ -36,6 +36,15 @@ return view.extend({
 		]);
 
 		window.setTimeout(function() { self.refreshPage(); }, 0);
+
+		// Auto-load traffic data if service is running
+		if (self.status && self.status.running) {
+			window.setTimeout(function() { self.loadTrafficData(); }, 500);
+			self._trafficTimer = window.setInterval(function() {
+				self.loadTrafficData();
+			}, 30000);
+		}
+
 		return view;
 	},
 
@@ -73,6 +82,13 @@ return view.extend({
 				'click': function(ev) { self.testAll(ev.target); }
 			}, '⚡ ' + _('Test All')),
 			E('button', {
+				'class': 'cbi-button',
+				'id': 'nm-traffic-btn',
+				'disabled': !running ? '' : null,
+				'title': _('Refresh traffic stats'),
+				'click': function(ev) { self.loadTrafficData(ev.target); }
+			}, '📊 ' + _('Traffic')),
+			E('button', {
 				'class': 'cbi-button cbi-button-save',
 				'id': 'nm-save-btn',
 				'click': function(ev) { self.handleSave(ev.target); }
@@ -102,6 +118,7 @@ return view.extend({
 			E('th', {'class': 'th', 'style': thS + 'width:12%'}, _('Password')),
 			E('th', {'class': 'th', 'style': thS + 'width:15ch'}, _('Bind IPs')),
 			E('th', {'class': 'th', 'style': thS + 'width:45px'}, _('Delay')),
+			E('th', {'class': 'th', 'style': thS + 'width:12ch'}, _('Traffic')),
 			E('th', {'class': 'th', 'style': thS + 'width:60px'}, _('Action'))
 		]);
 
@@ -223,6 +240,10 @@ return view.extend({
 			nm.delayBadge(null)
 		]);
 
+		var trafficCell = E('td', {'class': 'td', 'data-field': 'traffic', 'style': 'text-align:center;overflow:hidden;font-size:11px;line-height:1.4;'}, [
+			E('span', {'style': 'color:#868e96'}, '–')
+		]);
+
 		var btnS = 'width:24px;height:24px;padding:0;font-size:12px;line-height:24px;text-align:center;';
 
 		var testBtn = E('button', {
@@ -249,7 +270,17 @@ return view.extend({
 		// Hidden type field to preserve the value
 		var typeHidden = E('input', {'type': 'hidden', 'data-field': 'type', 'value': p.type || 'socks5'});
 
-		var dragHandle = E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;user-select:none;'}, ['☰', typeHidden]);
+		// Store type-specific extra fields in hidden JSON input for round-trip
+		var standardFields = {'name':1, 'type':1, 'server':1, 'port':1, 'username':1, 'password':1, 'bindips':1, '_warning':1};
+		var extraFields = {};
+		for (var key in p) {
+			if (p.hasOwnProperty(key) && !standardFields[key]) {
+				extraFields[key] = p[key];
+			}
+		}
+		var extraHidden = E('input', {'type': 'hidden', 'data-field': 'extra', 'value': JSON.stringify(extraFields)});
+
+		var dragHandle = E('td', {'class': 'td', 'style': 'cursor:grab;text-align:center;user-select:none;'}, ['☰', typeHidden, extraHidden]);
 		// Only the ☰ handle triggers drag, not the entire row (so inputs remain selectable)
 		dragHandle.addEventListener('mousedown', function() {
 			this.closest('tr').setAttribute('draggable', 'true');
@@ -284,6 +315,7 @@ return view.extend({
 				E('input', {'class': 'cbi-input-text', 'data-field': 'bindips', 'value': (p.bindips || []).join(', '), 'style': iS, 'placeholder': '192.168.5.101'})
 			]),
 			delayCell,
+			trafficCell,
 			E('td', {'class': 'td', 'style': 'white-space:nowrap;text-align:center;display:flex;gap:4px;justify-content:center;align-items:center;'}, [testBtn, delBtn])
 		]);
 	},
@@ -311,7 +343,7 @@ return view.extend({
 			};
 			var bindStr = get('bindips');
 			var bindips = bindStr ? bindStr.split(/[,\s]+/).filter(function(s) { return s; }) : [];
-			list.push({
+			var proxy = {
 				type: get('type'),
 				name: get('name'),
 				server: get('server'),
@@ -319,7 +351,18 @@ return view.extend({
 				username: get('username'),
 				password: get('password'),
 				bindips: bindips
-			});
+			};
+			// Merge type-specific extra fields from hidden JSON
+			var extraStr = get('extra');
+			if (extraStr) {
+				try {
+					var extra = JSON.parse(extraStr);
+					for (var k in extra) {
+						if (extra.hasOwnProperty(k)) proxy[k] = extra[k];
+					}
+				} catch(e) {}
+			}
+			list.push(proxy);
 		}
 		return list;
 	},
@@ -352,7 +395,7 @@ return view.extend({
 		var self = this;
 		var textarea = E('textarea', {
 			'style': 'width:100%;height:200px;font-family:monospace;font-size:12px;',
-			'placeholder': _('Paste proxies here (JSON / YAML / URL / TXT)...\n\nExamples:\nsocks5://user:pass@1.2.3.4:1080#Name\n1.2.3.4:1080 # Name\n[{"name":"HK","type":"socks5","server":"1.2.3.4","port":1080}]')
+			'placeholder': _('Paste proxies here (JSON / YAML / URI / Base64 subscription)...\n\nSupported:\nss://... vmess://... vless://... trojan://... hysteria2://...\nsocks5://user:pass@1.2.3.4:1080#Name\n[{"name":"HK","type":"socks5","server":"1.2.3.4","port":1080}]\n\nBase64 encoded content is auto-detected.')
 		});
 
 		var fileInput = E('input', {
@@ -375,7 +418,7 @@ return view.extend({
 
 		ui.showModal(_('Import Proxy Nodes'), [
 			E('div', {}, [
-				E('p', {}, _('Paste text or select a file. Format is auto-detected.')),
+				E('p', {}, _('Paste text, Base64 subscription content, or select a file. Format is auto-detected.')),
 				textarea,
 				E('div', {'style': 'display:flex;gap:12px;align-items:center;margin-top:8px;'}, [
 					fileInput,
@@ -585,6 +628,49 @@ return view.extend({
 		}
 		this.refreshPage();
 		this.updateBatchState();
+	},
+
+	// ── Traffic Stats ────────────────────────────────
+	loadTrafficData: function(btn) {
+		var self = this;
+		if (btn) {
+			btn.disabled = true;
+			btn.textContent = '📊 ' + _('Loading...');
+		}
+		nm.call('get_traffic')
+			.then(function(resp) {
+				if (resp && resp.ok && resp.data) {
+					self.updateTrafficCells(resp.data.traffic || {});
+				}
+			})
+			.catch(function() { /* silently ignore */ })
+			.finally(function() {
+				if (btn) {
+					btn.disabled = false;
+					btn.textContent = '📊 ' + _('Traffic');
+				}
+			});
+	},
+
+	updateTrafficCells: function(traffic) {
+		var rows = document.querySelectorAll('#nm-proxy-body tr');
+		for (var i = 0; i < rows.length; i++) {
+			var nameInput = rows[i].querySelector('[data-field="name"]');
+			var trafficCell = rows[i].querySelector('[data-field="traffic"]');
+			if (!nameInput || !trafficCell) continue;
+			var name = nameInput.value;
+			var t = traffic[name];
+			while (trafficCell.firstChild) trafficCell.removeChild(trafficCell.firstChild);
+			if (t && (t.upload > 0 || t.download > 0)) {
+				trafficCell.appendChild(E('span', {}, [
+					E('span', {'style': 'color:#339af0'}, '↑' + nm.formatBytes(t.upload)),
+					E('br'),
+					E('span', {'style': 'color:#51cf66'}, '↓' + nm.formatBytes(t.download))
+				]));
+			} else {
+				trafficCell.appendChild(E('span', {'style': 'color:#868e96'}, '–'));
+			}
+		}
 	},
 
 	handleSaveApply: null,
